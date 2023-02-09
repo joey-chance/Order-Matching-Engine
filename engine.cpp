@@ -1,8 +1,25 @@
 #include <iostream>
 #include <thread>
+#include <unordered_map>
+#include <string>
+#include <set>
+#include <utility>
+#include <unordered_set>
 
 #include "io.hpp"
 #include "engine.hpp"
+
+using Buys = std::set<ClientCommand&>;
+using Sells = std::set<ClientCommand&>;
+
+struct Orders {
+	Buys buys;
+	Sells sells;
+	std::mutex o_mutex;
+};
+
+static size_t order_id = 0;
+static std::unordered_map<std::string, Orders> order_book;
 
 void Engine::accept(ClientConnection connection)
 {
@@ -12,6 +29,7 @@ void Engine::accept(ClientConnection connection)
 
 void Engine::connection_thread(ClientConnection connection)
 {
+	std::unordered_set<ClientCommand&> my_orders();
 	while(true)
 	{
 		ClientCommand input {};
@@ -32,7 +50,17 @@ void Engine::connection_thread(ClientConnection connection)
 				// Remember to take timestamp at the appropriate time, or compute
 				// an appropriate timestamp!
 				auto output_time = getCurrentTimestamp();
+				// TODO:
+				// 1. check if order is in my_orders, else don't do anything
+				// 2. check if can cancel order (e.g. not being executed)
+				
 				Output::OrderDeleted(input.order_id, true, output_time);
+				break;
+			}
+			case input_buy: {
+				break;
+			}
+			case input_sell: {
 				break;
 			}
 
