@@ -52,7 +52,7 @@ void Engine::connection_thread(ClientConnection connection)
 				auto output_time = getCurrentTimestamp();
 				// TODO:
 				// 1. check if order is in my_orders, else don't do anything
-				// 2. check if can cancel order (e.g. not being executed)
+				// 2. check if can cancel order (e.g. not being executed), else wait
 				
 				Output::OrderDeleted(input.order_id, true, output_time);
 				break;
