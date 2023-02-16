@@ -9,15 +9,30 @@
 #include "io.hpp"
 #include "engine.hpp"
 
-using Buys = std::set<ClientCommand&>;
-using Sells = std::set<ClientCommand&>;
-
-struct Orders {
-	Buys buys;
-	Sells sells;
-	std::mutex o_mutex;
+struct OrderList {
+	std::set<ClientCommand&> orders;
+	std::mutex match_mutex;
+	std::mutex execute_mutex;
+	std::mutex enqueue_mutex;
 };
 
+struct Orders {
+	OrderList buys;
+	OrderList sells;
+};
+
+struct compareBuys {
+	bool operator()(const ClientCommand& a, const ClientCommand &b) {
+		// TODO: implement based on price-time
+		return true;
+	}
+};
+struct compareSells {
+	bool operator()(const ClientCommand& a, const ClientCommand &b) {
+		// TODO: implement based on price-time
+		return false;
+	}
+};
 static size_t order_id = 0;
 static std::unordered_map<std::string, Orders> order_book;
 
@@ -29,7 +44,8 @@ void Engine::accept(ClientConnection connection)
 
 void Engine::connection_thread(ClientConnection connection)
 {
-	std::unordered_set<ClientCommand&> my_orders();
+	std::unordered_map<int, std::weak_ptr<ClientCommand>> my_orders();
+	//std::unordered_map<int, iter of order_book> my_orders();
 	while(true)
 	{
 		ClientCommand input {};
@@ -58,6 +74,8 @@ void Engine::connection_thread(ClientConnection connection)
 				break;
 			}
 			case input_buy: {
+				
+				my_orders[input.order_id];
 				break;
 			}
 			case input_sell: {
