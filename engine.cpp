@@ -5,34 +5,36 @@
 #include <set>
 #include <utility>
 #include <unordered_set>
+#include <functional>
 
 #include "io.hpp"
 #include "engine.hpp"
 
-struct OrderList {
-	std::set<ClientCommand&> orders;
+
+struct BuyList {
+	auto cmp = [](ClientCommand& a, ClientCommand& b) {
+		//TODO: implement comparator
+		return true;
+	};
+	std::set<ClientCommand&, cmp> orders;
 	std::mutex match_mutex;
 	std::mutex execute_mutex;
 	std::mutex enqueue_mutex;
 };
 
-struct Orders {
-	OrderList buys;
-	OrderList sells;
+struct SellList {
+	auto cmp = [](ClientCommand& a, ClientCommand& b) {
+		//TODO: implement comparator
+		return true;
+	};
+	std::set<ClientCommand&, cmp> orders;
+	std::mutex match_mutex;
+	std::mutex execute_mutex;
+	std::mutex enqueue_mutex;
 };
 
-struct compareBuys {
-	bool operator()(const ClientCommand& a, const ClientCommand &b) {
-		// TODO: implement based on price-time
-		return true;
-	}
-};
-struct compareSells {
-	bool operator()(const ClientCommand& a, const ClientCommand &b) {
-		// TODO: implement based on price-time
-		return false;
-	}
-};
+using Orders = std::pair<BuyList, SellList>;
+
 static size_t order_id = 0;
 static std::unordered_map<std::string, Orders> order_book;
 
