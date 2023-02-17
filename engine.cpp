@@ -7,6 +7,7 @@
 #include <unordered_set>
 #include <functional>
 #include <set>
+#include <memory>
 
 #include "io.hpp"
 #include "engine.hpp"
@@ -21,17 +22,19 @@ struct Order
 	}
 	bool operator<(const Order& a) const
 	{
+		// Used for sorting Buys
 		if (info.price == a.info.price) 
 		{
-			return a.time > time;
+			return time < a.time;
 		}
 		return a.info.price < info.price;
 	}
 	bool operator>(const Order& a) const
 	{
+		// Used for sorting Sells
 		if (info.price == a.info.price) 
 		{
-			return a.time > time;
+			return time < a.time;
 		}
 		return a.info.price > info.price;
 	}
@@ -54,6 +57,7 @@ struct Sells
 };
 
 using Orders = std::pair<Buys, Sells>;
+using Order_Set = std::pair<std::weak_ptr<Order>, Orders*>;
 
 static uint64_t timestamp = 0;
 static uint32_t order_id = 0;
@@ -67,7 +71,7 @@ void Engine::accept(ClientConnection connection)
 
 void Engine::connection_thread(ClientConnection connection)
 {
-	std::unordered_map<int, std::set<Order>& > my_orders;
+	std::unordered_map<int, Order_Set> my_orders;
 	while(true)
 	{
 		ClientCommand input {};
@@ -78,22 +82,46 @@ void Engine::connection_thread(ClientConnection connection)
 			case ReadResult::Success: break;
 		}
 
-		// Functions for printing output actions in the prescribed format are
-		// provided in the Output class:
 		switch(input.type)
 		{
 			case input_cancel: {
 				SyncCerr {} << "Got cancel: ID: " << input.order_id << std::endl;
 
-				// Remember to take timestamp at the appropriate time, or compute
-				// an appropriate timestamp!
-				auto output_time = getCurrentTimestamp();
-				// TODO:
-				// 1. check if order is in my_orders, else don't do anything
-				// 2. check if can cancel order (e.g. not being executed), else wait
-				
-				Output::OrderDeleted(input.order_id, true, output_time);
-				break;
+				if (my_orders.find(input.order_id) == my_orders.end()) 
+				{
+					Output::OrderDeleted(input.order_id, false, timestamp++);
+					break;
+				}
+
+				Order_Set order_set = my_orders[input.order_id];
+				std::shared_ptr<Order> orderptr = order_set.first.lock();
+				if (!orderptr)
+				{
+					Output::OrderDeleted(input.order_id, false, timestamp++);
+					break;
+				}
+				if (orderptr->info.type == input_buy) 
+				{
+					auto iter = (*(order_set.second)).first.pq.find(*orderptr.get());
+					if (iter == (*(order_set.second)).first.pq.end()) {
+						Output::OrderDeleted(input.order_id, false, timestamp++);
+						break;
+					}
+					(*(order_set.second)).first.pq.erase(iter);
+					Output::OrderDeleted(input.order_id, true, timestamp++);
+					break;
+
+				} else 
+				{
+					auto iter = (*(order_set.second)).second.pq.find(*orderptr.get());
+					if (iter == (*(order_set.second)).second.pq.end()) {
+						Output::OrderDeleted(input.order_id, false, timestamp++);
+						break;
+					}
+					(*(order_set.second)).second.pq.erase(iter);
+					Output::OrderDeleted(input.order_id, true, timestamp++);
+					break;
+				}
 			}
 			case input_buy: {
 				break;
