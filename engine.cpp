@@ -56,12 +56,17 @@ struct Sells
 	std::mutex enqueue_mutex;
 };
 
-using Orders = std::pair<Buys, Sells>;
+struct Orders 
+{
+	Buys buys;
+	Sells sells;
+};
+
 using Order_Set = std::pair<std::weak_ptr<Order>, Orders*>;
 
 static uint64_t timestamp = 0;
-static uint32_t order_id = 0;
-static std::unordered_map<std::string, Orders> order_book;
+// static uint32_t order_id = 0;
+static std::unordered_map<std::string, Orders*> order_book;
 
 void Engine::accept(ClientConnection connection)
 {
@@ -72,6 +77,16 @@ void Engine::accept(ClientConnection connection)
 void Engine::connection_thread(ClientConnection connection)
 {
 	std::unordered_map<int, Order_Set> my_orders;
+	//To test the data structures
+	/*
+	ClientCommand cmd {input_buy, 125, 1, 1, "AAPL"};
+	Order order {cmd, 1};
+	order_book["AAPL"] = new Orders();
+	(*order_book["AAPL"]).buys.pq.insert(order);
+	auto ptr = std::make_shared<Order>(order);
+	std::weak_ptr<Order> wptr = ptr;
+	my_orders[125] = std::pair<std::weak_ptr<Order>, Orders*>(wptr, order_book["AAPL"]);
+	*/
 	while(true)
 	{
 		ClientCommand input {};
@@ -89,6 +104,7 @@ void Engine::connection_thread(ClientConnection connection)
 
 				if (my_orders.find(input.order_id) == my_orders.end()) 
 				{
+					std::cout << "CANNOT FIND" << input.order_id << std::endl;
 					Output::OrderDeleted(input.order_id, false, timestamp++);
 					break;
 				}
@@ -97,28 +113,32 @@ void Engine::connection_thread(ClientConnection connection)
 				std::shared_ptr<Order> orderptr = order_set.first.lock();
 				if (!orderptr)
 				{
+					std::cout << "ORDER IS DELETED\n";
 					Output::OrderDeleted(input.order_id, false, timestamp++);
 					break;
 				}
 				if (orderptr->info.type == input_buy) 
 				{
-					auto iter = (*(order_set.second)).first.pq.find(*orderptr.get());
-					if (iter == (*(order_set.second)).first.pq.end()) {
+					auto iter = (*(order_set.second)).buys.pq.find(*orderptr.get());
+					if (iter == (*(order_set.second)).buys.pq.end()) {
+						std::cout << "ORDER IS DELETED RIGHT BEFORE THIS\n";
 						Output::OrderDeleted(input.order_id, false, timestamp++);
 						break;
 					}
-					(*(order_set.second)).first.pq.erase(iter);
+					(order_set.second)->buys.pq.erase(iter);
+					std::cout << "HOORAYYY\n";
 					Output::OrderDeleted(input.order_id, true, timestamp++);
 					break;
 
 				} else 
 				{
-					auto iter = (*(order_set.second)).second.pq.find(*orderptr.get());
-					if (iter == (*(order_set.second)).second.pq.end()) {
+					auto iter = (*(order_set.second)).sells.pq.find(*orderptr.get());
+					if (iter == (*(order_set.second)).sells.pq.end()) {
+						std::cout << "ORDER IS DELETED RIGHT BEFORE THIS\n";
 						Output::OrderDeleted(input.order_id, false, timestamp++);
 						break;
 					}
-					(*(order_set.second)).second.pq.erase(iter);
+					(order_set.second)->sells.pq.erase(iter);
 					Output::OrderDeleted(input.order_id, true, timestamp++);
 					break;
 				}
