@@ -8,6 +8,7 @@
 #include <functional>
 #include <set>
 #include <memory>
+#include <algorithm>
 
 #include "io.hpp"
 #include "engine.hpp"
@@ -62,10 +63,9 @@ struct Orders
 	Sells sells;
 };
 
-using Order_Set = std::pair<std::weak_ptr<Order>, Orders*>;
+using Order_And_Set = std::pair<std::shared_ptr<Order>, Orders*>;
 
 static uint64_t timestamp = 0;
-// static uint32_t order_id = 0;
 static std::unordered_map<std::string, Orders*> order_book;
 
 void Engine::accept(ClientConnection connection)
@@ -76,17 +76,7 @@ void Engine::accept(ClientConnection connection)
 
 void Engine::connection_thread(ClientConnection connection)
 {
-	std::unordered_map<int, Order_Set> my_orders;
-	//To test the data structures
-	/*
-	ClientCommand cmd {input_buy, 125, 1, 1, "AAPL"};
-	Order order {cmd, 1};
-	order_book["AAPL"] = new Orders();
-	(*order_book["AAPL"]).buys.pq.insert(order);
-	auto ptr = std::make_shared<Order>(order);
-	std::weak_ptr<Order> wptr = ptr;
-	my_orders[125] = std::pair<std::weak_ptr<Order>, Orders*>(wptr, order_book["AAPL"]);
-	*/
+	std::unordered_map<int, Order_And_Set> my_orders;
 	while(true)
 	{
 		ClientCommand input {};
@@ -104,46 +94,93 @@ void Engine::connection_thread(ClientConnection connection)
 
 				if (my_orders.find(input.order_id) == my_orders.end()) 
 				{
-					std::cout << "CANNOT FIND" << input.order_id << std::endl;
+					std::cout << "CANNOT FIND " << input.order_id << std::endl;
 					Output::OrderDeleted(input.order_id, false, timestamp++);
 					break;
 				}
 
-				Order_Set order_set = my_orders[input.order_id];
-				std::shared_ptr<Order> orderptr = order_set.first.lock();
-				if (!orderptr)
-				{
-					std::cout << "ORDER IS DELETED\n";
-					Output::OrderDeleted(input.order_id, false, timestamp++);
-					break;
-				}
+				Order_And_Set order_set = my_orders[input.order_id];
+				std::shared_ptr<Order> orderptr = order_set.first;
+				// std::shared_ptr<Order> orderptr = order_set.first.lock();
+				// if (!orderptr)
+				// {
+				// 	std::cout << "ORDER IS DELETED\n";
+				// 	Output::OrderDeleted(input.order_id, false, timestamp++);
+				// 	break;
+				// }
 				if (orderptr->info.type == input_buy) 
 				{
-					auto iter = (*(order_set.second)).buys.pq.find(*orderptr.get());
-					if (iter == (*(order_set.second)).buys.pq.end()) {
+					auto iter = (order_set.second)->buys.pq.find(*orderptr.get());
+					if (iter == (order_set.second)->buys.pq.end()) {
 						std::cout << "ORDER IS DELETED RIGHT BEFORE THIS\n";
+						//TODO: delete from my_orders
 						Output::OrderDeleted(input.order_id, false, timestamp++);
 						break;
 					}
 					(order_set.second)->buys.pq.erase(iter);
 					std::cout << "HOORAYYY\n";
 					Output::OrderDeleted(input.order_id, true, timestamp++);
-					break;
-
 				} else 
 				{
-					auto iter = (*(order_set.second)).sells.pq.find(*orderptr.get());
-					if (iter == (*(order_set.second)).sells.pq.end()) {
+					auto iter = (order_set.second)->sells.pq.find(*orderptr.get());
+					if (iter == (order_set.second)->sells.pq.end()) {
 						std::cout << "ORDER IS DELETED RIGHT BEFORE THIS\n";
+						//TODO: delete from my_orders
 						Output::OrderDeleted(input.order_id, false, timestamp++);
 						break;
 					}
 					(order_set.second)->sells.pq.erase(iter);
 					Output::OrderDeleted(input.order_id, true, timestamp++);
-					break;
 				}
+				break;
 			}
 			case input_buy: {
+				if (order_book.find(input.instrument) == order_book.end())
+				{
+					std::cout << "Adding new instrument\n";
+					order_book[input.instrument] = new Orders();
+					Order order {input, timestamp++};
+					order_book[input.instrument]->buys.pq.insert(order);
+					Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
+					auto ptr = std::make_shared<Order>(order);
+					my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
+
+				} else 
+				{
+					Orders *orders = order_book[input.instrument];
+					uint32_t execution_id = 1;
+					while (!orders->sells.pq.empty() && input.count > 0) 
+					{
+						if ((orders->sells.pq.begin())->info.price > input.price) {
+							break;
+						} else 
+						{
+							auto sell = orders->sells.pq.begin();
+							if (input.count < sell->info.count)
+							{
+								auto node = orders->sells.pq.extract(sell);
+								node.value().info.count -= input.count;
+								orders->sells.pq.insert(std::move(node));
+								Output::OrderExecuted(node.value().info.order_id, input.order_id, execution_id++, node.value().info.price, input.count, timestamp++);
+								input.count = 0;
+							} else {
+								input.count -= sell->info.count;
+								Output::OrderExecuted(sell->info.order_id, input.order_id, execution_id++, sell->info.price, sell->info.count, timestamp++);
+								orders->sells.pq.erase(sell);
+							}
+						}
+					}
+					if (input.count > 0)
+					{
+						if (!order_book.contains(input.instrument))
+							order_book[input.instrument] = new Orders();
+						Order order {input, timestamp++};
+						order_book[input.instrument]->buys.pq.insert(order);
+						Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
+						auto ptr = std::make_shared<Order>(order);
+						my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
+					}
+				}
 				break;
 			}
 			case input_sell: {
@@ -157,9 +194,9 @@ void Engine::connection_thread(ClientConnection connection)
 
 				// Remember to take timestamp at the appropriate time, or compute
 				// an appropriate timestamp!
-				auto output_time = getCurrentTimestamp();
-				Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, input.type == input_sell,
-				    output_time);
+				// auto output_time = getCurrentTimestamp();
+				// Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, input.type == input_sell,
+				//     output_time);
 				break;
 			}
 		}
@@ -168,10 +205,10 @@ void Engine::connection_thread(ClientConnection connection)
 
 		// Remember to take timestamp at the appropriate time, or compute
 		// an appropriate timestamp!
-		intmax_t output_time = getCurrentTimestamp();
+		// intmax_t output_time = getCurrentTimestamp();
 
 		// Check the parameter names in `io.hpp`.
-		Output::OrderExecuted(123, 124, 1, 2000, 10, output_time);
+		// Output::OrderExecuted(123, 124, 1, 2000, 10, output_time);
 	}
 }
 
@@ -203,4 +240,15 @@ ClientCommand input {};
 	Order bottom = *sells.pq.begin();
 	std::cout << bottom.info.price << bottom.info.count << std::endl;
 	return;
+*/
+
+//To test the data structures
+/*
+ClientCommand cmd {input_buy, 125, 1, 1, "AAPL"};
+Order order {cmd, 1};
+order_book["AAPL"] = new Orders();
+(*order_book["AAPL"]).buys.pq.insert(order);
+auto ptr = std::make_shared<Order>(order);
+std::weak_ptr<Order> wptr = ptr;
+my_orders[125] = std::pair<std::weak_ptr<Order>, Orders*>(wptr, order_book["AAPL"]);
 */
