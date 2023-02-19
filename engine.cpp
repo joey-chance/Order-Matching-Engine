@@ -101,19 +101,12 @@ void Engine::connection_thread(ClientConnection connection)
 
 				Order_And_Set order_set = my_orders[input.order_id];
 				std::shared_ptr<Order> orderptr = order_set.first;
-				// std::shared_ptr<Order> orderptr = order_set.first.lock();
-				// if (!orderptr)
-				// {
-				// 	std::cout << "ORDER IS DELETED\n";
-				// 	Output::OrderDeleted(input.order_id, false, timestamp++);
-				// 	break;
-				// }
 				if (orderptr->info.type == input_buy) 
 				{
 					auto iter = (order_set.second)->buys.pq.find(*orderptr.get());
 					if (iter == (order_set.second)->buys.pq.end()) {
 						std::cout << "ORDER IS DELETED RIGHT BEFORE THIS\n";
-						//TODO: delete from my_orders
+						my_orders.erase(input.order_id);
 						Output::OrderDeleted(input.order_id, false, timestamp++);
 						break;
 					}
@@ -125,7 +118,7 @@ void Engine::connection_thread(ClientConnection connection)
 					auto iter = (order_set.second)->sells.pq.find(*orderptr.get());
 					if (iter == (order_set.second)->sells.pq.end()) {
 						std::cout << "ORDER IS DELETED RIGHT BEFORE THIS\n";
-						//TODO: delete from my_orders
+						my_orders.erase(input.order_id);
 						Output::OrderDeleted(input.order_id, false, timestamp++);
 						break;
 					}
@@ -144,7 +137,6 @@ void Engine::connection_thread(ClientConnection connection)
 					Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
 					auto ptr = std::make_shared<Order>(order);
 					my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
-
 				} else 
 				{
 					Orders *orders = order_book[input.instrument];
@@ -184,6 +176,52 @@ void Engine::connection_thread(ClientConnection connection)
 				break;
 			}
 			case input_sell: {
+				if (order_book.find(input.instrument) == order_book.end())
+				{
+					std::cout << "Adding new instrument\n";
+					order_book[input.instrument] = new Orders();
+					Order order {input, timestamp++};
+					order_book[input.instrument]->sells.pq.insert(order);
+					Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
+					auto ptr = std::make_shared<Order>(order);
+					my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
+
+				} else 
+				{
+					Orders *orders = order_book[input.instrument];
+					uint32_t execution_id = 1;
+					while (!orders->buys.pq.empty() && input.count > 0) 
+					{
+						if ((orders->buys.pq.begin())->info.price < input.price) {
+							break;
+						} else 
+						{
+							auto buy = orders->buys.pq.begin();
+							if (input.count < buy->info.count)
+							{
+								auto node = orders->buys.pq.extract(buy);
+								node.value().info.count -= input.count;
+								orders->buys.pq.insert(std::move(node));
+								Output::OrderExecuted(node.value().info.order_id, input.order_id, execution_id++, node.value().info.price, input.count, timestamp++);
+								input.count = 0;
+							} else {
+								input.count -= buy->info.count;
+								Output::OrderExecuted(buy->info.order_id, input.order_id, execution_id++, buy->info.price, buy->info.count, timestamp++);
+								orders->buys.pq.erase(buy);
+							}
+						}
+					}
+					if (input.count > 0)
+					{
+						if (!order_book.contains(input.instrument))
+							order_book[input.instrument] = new Orders();
+						Order order {input, timestamp++};
+						order_book[input.instrument]->sells.pq.insert(order);
+						Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
+						auto ptr = std::make_shared<Order>(order);
+						my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
+					}
+				}
 				break;
 			}
 
