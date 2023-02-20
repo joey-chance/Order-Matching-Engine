@@ -94,7 +94,7 @@ void Engine::connection_thread(ClientConnection connection)
 			case input_cancel: {
 				SyncCerr {} << "Got cancel: ID: " << input.order_id << std::endl;
 
-				if (my_orders.find(input.order_id) == my_orders.end()) 
+				if (!my_orders.contains(input.order_id)) 
 				{
 					// std::cout << "CANNOT FIND " << input.order_id << std::endl;
 					Output::OrderDeleted(input.order_id, false, timestamp++);
