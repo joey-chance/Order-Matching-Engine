@@ -108,26 +108,24 @@ void Engine::connection_thread(ClientConnection connection)
 				std::shared_ptr<Order> orderptr = order_set.first;
 				if (orderptr->info.type == input_buy) 
 				{
-					auto iter = (order_set.second)->buys.pq.find(*orderptr.get());
-					if (iter == (order_set.second)->buys.pq.end()) {
+					if (!(order_set.second)->buys.pq.contains(*orderptr.get())) {
 						// std::cout << "ORDER IS DELETED RIGHT BEFORE THIS\n";
 						my_orders.erase(input.order_id);
 						Output::OrderDeleted(input.order_id, false, timestamp++);
 						break;
 					}
-					(order_set.second)->buys.pq.erase(iter);
+					(order_set.second)->buys.pq.erase(*orderptr.get());
 					// std::cout << "HOORAYYY\n";
 					Output::OrderDeleted(input.order_id, true, timestamp++);
 				} else 
 				{
-					auto iter = (order_set.second)->sells.pq.find(*orderptr.get());
-					if (iter == (order_set.second)->sells.pq.end()) {
+					if (!(order_set.second)->sells.pq.contains(*orderptr.get())) {
 						// std::cout << "ORDER IS DELETED RIGHT BEFORE THIS\n";
 						my_orders.erase(input.order_id);
 						Output::OrderDeleted(input.order_id, false, timestamp++);
 						break;
 					}
-					(order_set.second)->sells.pq.erase(iter);
+					(order_set.second)->sells.pq.erase(*orderptr.get());
 					Output::OrderDeleted(input.order_id, true, timestamp++);
 				}
 				break;
@@ -137,7 +135,7 @@ void Engine::connection_thread(ClientConnection connection)
 
 				{//Reader Lock, check if instr exists
 					std::shared_lock lock(oob_mutex);
-					instr_exists = order_book.find(input.instrument) != order_book.end();
+					instr_exists = order_book.contains(input.instrument);
 				}
 				if (!instr_exists)
 				{ //If instr does not exist, writer lock for order_book writing
@@ -209,7 +207,7 @@ void Engine::connection_thread(ClientConnection connection)
 
 				{//Reader Lock, check if instr exists
 					std::shared_lock lock(oob_mutex);
-					instr_exists = order_book.find(input.instrument) != order_book.end();
+					instr_exists = order_book.contains(input.instrument);
 				}
 				if (!instr_exists)
 				{ //If instr does not exist, writer lock for order_book writing
