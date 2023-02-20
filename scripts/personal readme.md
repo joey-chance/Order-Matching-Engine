@@ -10,7 +10,7 @@
 2. eg: `./grader engine < ./grader engine < scripts/concurrent-buy_then_concurrent_sell_medium.in`
 
 Todo:
-0. Lock pqs when accessing
+0. Figure out a way to break instr concurr w/o instr locks (to test that instr locks are useful)
 1. Change to timestamp, execution_id std::atomic<int>
 2. Fix segfault on partial filling orders
 
