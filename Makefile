@@ -6,7 +6,7 @@ CXXFLAGS := $(CXXFLAGS) -g -O3 -Wall -Wextra -pedantic -Werror -std=c++20 -pthre
 
 BUILDDIR = build
 
-SRCS = main.cpp engine.cpp io.cpp lightswitch.cpp
+SRCS = main.cpp engine.cpp io.cpp
 
 all: engine client
 

@@ -9,11 +9,10 @@
 #include <set>
 #include <memory>
 #include <algorithm>
-#include <semaphore.h>
+#include <shared_mutex>
 
 #include "io.hpp"
 #include "engine.hpp"
-#include "lightswitch.hpp"
 
 struct Order
 {
@@ -71,10 +70,8 @@ static uint64_t timestamp = 0;
 static std::unordered_map<std::string, Orders*> order_book;
 
 //Synchronization Variables for order_book
-sem_t ext_sem;
-int sem_init_temp = sem_init(&ext_sem, 0, 1);
-std::mutex turnstile;
-Lightswitch room_switch(ext_sem);
+std::shared_mutex oob_mutex; //TODO: Do I need mutable keyword? 
+//https://stackoverflow.com/questions/105014/does-the-mutable-keyword-have-any-purpose-other-than-allowing-the-variable-to
 //END: Synchronization Variables for order_book 
 
 void Engine::accept(ClientConnection connection)
@@ -139,18 +136,14 @@ void Engine::connection_thread(ClientConnection connection)
 			case input_buy: {
 				bool instr_exists;
 
-				//Reader Lock, check if instr exists
-				turnstile.lock();
-				turnstile.unlock();
-				room_switch.enter();
+				{//Reader Lock, check if instr exists
+					std::shared_lock lock(oob_mutex);
 					instr_exists = order_book.find(input.instrument) != order_book.end();
-				room_switch.exit();
-				
+				}
 				if (!instr_exists)
 				{ //If instr does not exist, writer lock for order_book writing
-					turnstile.lock();
-					sem_wait(&ext_sem);
-						//critical section
+					std::unique_lock lock(oob_mutex);
+						//BEGIN: Writer Critical Section
 						//Create instrument orders
 						// std::cout << "Adding new instrument\n";
 						order_book[input.instrument] = new Orders(); //write order_book
@@ -164,14 +157,11 @@ void Engine::connection_thread(ClientConnection connection)
 						auto ptr = std::make_shared<Order>(order);
 						my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]); //read order_book
 						//END: critical section
-					turnstile.unlock();
-					sem_post(&ext_sem);
+
 				} else 
 				{ //Else, reader lock for matching
-					turnstile.lock();
-					turnstile.unlock();
-					room_switch.enter();
-						//critical section
+					std::shared_lock lock(oob_mutex);
+						//BEGIN: Reader Critical Section
 						//Get list of resting orders for this instrument
 						Orders *orders = order_book[input.instrument];//read order_book
 						uint32_t execution_id = 1;
@@ -211,56 +201,69 @@ void Engine::connection_thread(ClientConnection connection)
 							auto ptr = std::make_shared<Order>(order);
 							my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]); //read order_book
 						}
-						//END: critical section
-					room_switch.exit();
+						//END: Reader Critical Section
 				}
 				break;
 			}
 			case input_sell: {
-				if (order_book.find(input.instrument) == order_book.end())
-				{
-					// std::cout << "Adding new instrument\n";
-					order_book[input.instrument] = new Orders();
-					Order order {input, timestamp++};
-					order_book[input.instrument]->sells.pq.insert(order);
-					Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
-					auto ptr = std::make_shared<Order>(order);
-					my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
-				} else 
-				{
-					Orders *orders = order_book[input.instrument];
-					uint32_t execution_id = 1;
-					while (!orders->buys.pq.empty() && input.count > 0) 
-					{
-						if ((orders->buys.pq.begin())->info.price < input.price) {
-							break;
-						} else 
-						{
-							auto buy = orders->buys.pq.begin();
-							if (input.count < buy->info.count)
-							{
-								auto node = orders->buys.pq.extract(buy);
-								node.value().info.count -= input.count;
-								orders->buys.pq.insert(std::move(node));
-								Output::OrderExecuted(node.value().info.order_id, input.order_id, execution_id++, node.value().info.price, input.count, timestamp++);
-								input.count = 0;
-							} else {
-								input.count -= buy->info.count;
-								Output::OrderExecuted(buy->info.order_id, input.order_id, execution_id++, buy->info.price, buy->info.count, timestamp++);
-								orders->buys.pq.erase(buy);
-							}
-						}
-					}
-					if (input.count > 0)
-					{
+				bool instr_exists;
+
+				{//Reader Lock, check if instr exists
+					std::shared_lock lock(oob_mutex);
+					instr_exists = order_book.find(input.instrument) != order_book.end();
+				}
+				if (!instr_exists)
+				{ //If instr does not exist, writer lock for order_book writing
+					std::unique_lock lock(oob_mutex);
+						//BEGIN: Writer Critical Section
+						// std::cout << "Adding new instrument\n";
+						order_book[input.instrument] = new Orders();
 						Order order {input, timestamp++};
 						order_book[input.instrument]->sells.pq.insert(order);
 						Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
 						auto ptr = std::make_shared<Order>(order);
 						my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
+						//END: Reader Critical Section
+				} else 
+				{//Else, reader lock for matching
+					std::shared_lock lock(oob_mutex);
+						//BEGIN: Reader Critical Section
+						Orders *orders = order_book[input.instrument];
+						uint32_t execution_id = 1;
+						while (!orders->buys.pq.empty() && input.count > 0) 
+						{
+							if ((orders->buys.pq.begin())->info.price < input.price) {
+								break;
+							} else 
+							{
+								auto buy = orders->buys.pq.begin();
+								if (input.count < buy->info.count)
+								{
+									auto node = orders->buys.pq.extract(buy);
+									node.value().info.count -= input.count;
+									orders->buys.pq.insert(std::move(node));
+									Output::OrderExecuted(node.value().info.order_id, input.order_id, execution_id++, node.value().info.price, input.count, timestamp++);
+									input.count = 0;
+								} else {
+									input.count -= buy->info.count;
+									Output::OrderExecuted(buy->info.order_id, input.order_id, execution_id++, buy->info.price, buy->info.count, timestamp++);
+									orders->buys.pq.erase(buy);
+								}
+							}
+						}
+						if (input.count > 0)
+						{
+							if (!order_book.contains(input.instrument))
+								order_book[input.instrument] = new Orders();
+							Order order {input, timestamp++};
+							order_book[input.instrument]->sells.pq.insert(order);
+							Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
+							auto ptr = std::make_shared<Order>(order);
+							my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
+						}
 					}
-				}
-				break;
+					//END: Reader Critical Section
+					break;
 			}
 
 			default: {
