@@ -45,29 +45,26 @@ struct Order
 struct Buys
 {
 	std::set<Order> pq;
-	std::mutex match_mutex;
-	std::mutex execute_mutex;
-	std::mutex enqueue_mutex;
 };
 
 struct Sells
 {
 	std::set<Order, std::greater<Order> > pq;
-	std::mutex match_mutex;
-	std::mutex execute_mutex;
-	std::mutex enqueue_mutex;
 };
 
 struct Orders 
 {
 	Buys buys;
 	Sells sells;
+	std::mutex match_mutex;
+	std::mutex execute_mutex;
+	std::mutex enqueue_mutex;
 };
 
-using Order_And_Set = std::pair<std::shared_ptr<Order>, Orders*>;
+using Order_And_Set = std::pair<std::shared_ptr<Order>, std::shared_ptr<Orders>>;
 
 static uint64_t timestamp = 0;
-static std::unordered_map<std::string, Orders*> order_book;
+static std::unordered_map<std::string, std::shared_ptr<Orders>> order_book;
 
 //Synchronization Variables for order_book
 std::shared_mutex oob_mutex;
@@ -97,37 +94,35 @@ void Engine::connection_thread(ClientConnection connection)
 			case input_cancel: {
 				SyncCerr {} << "Got cancel: ID: " << input.order_id << std::endl;
 
-				if (my_orders.find(input.order_id) == my_orders.end()) 
+				if (!my_orders.contains(input.order_id)) 
 				{
 					// std::cout << "CANNOT FIND " << input.order_id << std::endl;
 					Output::OrderDeleted(input.order_id, false, timestamp++);
 					break;
 				}
 
-				Order_And_Set order_set = my_orders[input.order_id];
+				Order_And_Set order_set = my_orders[input.order_id]; //read my_orders
 				std::shared_ptr<Order> orderptr = order_set.first;
 				if (orderptr->info.type == input_buy) 
 				{
-					auto iter = (order_set.second)->buys.pq.find(*orderptr.get());
-					if (iter == (order_set.second)->buys.pq.end()) {
+					if (!(order_set.second)->buys.pq.contains(*orderptr.get())) {
 						// std::cout << "ORDER IS DELETED RIGHT BEFORE THIS\n";
 						my_orders.erase(input.order_id);
 						Output::OrderDeleted(input.order_id, false, timestamp++);
 						break;
 					}
-					(order_set.second)->buys.pq.erase(iter);
+					(order_set.second)->buys.pq.erase(*orderptr.get());
 					// std::cout << "HOORAYYY\n";
 					Output::OrderDeleted(input.order_id, true, timestamp++);
 				} else 
 				{
-					auto iter = (order_set.second)->sells.pq.find(*orderptr.get());
-					if (iter == (order_set.second)->sells.pq.end()) {
+					if (!(order_set.second)->sells.pq.contains(*orderptr.get())) {
 						// std::cout << "ORDER IS DELETED RIGHT BEFORE THIS\n";
 						my_orders.erase(input.order_id);
 						Output::OrderDeleted(input.order_id, false, timestamp++);
 						break;
 					}
-					(order_set.second)->sells.pq.erase(iter);
+					(order_set.second)->sells.pq.erase(*orderptr.get());
 					Output::OrderDeleted(input.order_id, true, timestamp++);
 				}
 				break;
@@ -137,7 +132,7 @@ void Engine::connection_thread(ClientConnection connection)
 
 				{//Reader Lock, check if instr exists
 					std::shared_lock lock(oob_mutex);
-					instr_exists = order_book.find(input.instrument) != order_book.end();
+					instr_exists = order_book.contains(input.instrument);
 				}
 				if (!instr_exists)
 				{ //If instr does not exist, writer lock for order_book writing
@@ -145,7 +140,8 @@ void Engine::connection_thread(ClientConnection connection)
 						//BEGIN: Writer Critical Section
 						//Create instrument orders
 						// std::cout << "Adding new instrument\n";
-						order_book[input.instrument] = new Orders(); //write order_book
+						Orders temp;
+						order_book[input.instrument] = std::make_shared<Orders>(temp); //write order_book
 						//Create Order
 						Order order {input, timestamp++};
 						//Insert order into Buys PQ
@@ -162,7 +158,7 @@ void Engine::connection_thread(ClientConnection connection)
 					std::shared_lock lock(oob_mutex);
 						//BEGIN: Reader Critical Section
 						//Get list of resting orders for this instrument
-						Orders *orders = order_book[input.instrument];//read order_book
+						std::shared_ptr<Orders> orders = order_book[input.instrument];//read order_book
 						uint32_t execution_id = 1;
 						//Read sells order
 						//TODO: Lock instr sells mutex
@@ -209,14 +205,15 @@ void Engine::connection_thread(ClientConnection connection)
 
 				{//Reader Lock, check if instr exists
 					std::shared_lock lock(oob_mutex);
-					instr_exists = order_book.find(input.instrument) != order_book.end();
+					instr_exists = order_book.contains(input.instrument);
 				}
 				if (!instr_exists)
 				{ //If instr does not exist, writer lock for order_book writing
 					std::unique_lock lock(oob_mutex);
 						//BEGIN: Writer Critical Section
 						// std::cout << "Adding new instrument\n";
-						order_book[input.instrument] = new Orders();
+						Orders temp;
+						order_book[input.instrument] = std::make_shared<Orders>(temp);
 						Order order {input, timestamp++};
 						order_book[input.instrument]->sells.pq.insert(order);
 						Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
@@ -227,7 +224,7 @@ void Engine::connection_thread(ClientConnection connection)
 				{//Else, reader lock for matching
 					std::shared_lock lock(oob_mutex);
 						//BEGIN: Reader Critical Section
-						Orders *orders = order_book[input.instrument];
+						std::shared_ptr<Orders> orders = order_book[input.instrument];
 						uint32_t execution_id = 1;
 						while (!orders->buys.pq.empty() && input.count > 0) 
 						{
@@ -252,8 +249,6 @@ void Engine::connection_thread(ClientConnection connection)
 						}
 						if (input.count > 0)
 						{
-							if (!order_book.contains(input.instrument))
-								order_book[input.instrument] = new Orders();
 							Order order {input, timestamp++};
 							order_book[input.instrument]->sells.pq.insert(order);
 							Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
