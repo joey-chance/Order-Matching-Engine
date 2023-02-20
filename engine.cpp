@@ -247,8 +247,6 @@ void Engine::connection_thread(ClientConnection connection)
 						}
 						if (input.count > 0)
 						{
-							if (!order_book.contains(input.instrument))
-								order_book[input.instrument] = new Orders();
 							Order order {input, timestamp++};
 							order_book[input.instrument]->sells.pq.insert(order);
 							Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
