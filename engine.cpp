@@ -70,8 +70,7 @@ static uint64_t timestamp = 0;
 static std::unordered_map<std::string, Orders*> order_book;
 
 //Synchronization Variables for order_book
-std::shared_mutex oob_mutex; //TODO: Do I need mutable keyword? 
-//https://stackoverflow.com/questions/105014/does-the-mutable-keyword-have-any-purpose-other-than-allowing-the-variable-to
+std::shared_mutex oob_mutex;
 //END: Synchronization Variables for order_book 
 
 void Engine::accept(ClientConnection connection)
