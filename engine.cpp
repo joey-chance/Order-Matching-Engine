@@ -140,8 +140,7 @@ void Engine::connection_thread(ClientConnection connection)
 						//BEGIN: Writer Critical Section
 						//Create instrument orders
 						// std::cout << "Adding new instrument\n";
-						Orders temp;
-						order_book[input.instrument] = std::make_shared<Orders>(temp); //write order_book
+						order_book[input.instrument] = std::make_shared<Orders>(); //write order_book
 						//Create Order
 						Order order {input, timestamp++};
 						//Insert order into Buys PQ
@@ -212,8 +211,7 @@ void Engine::connection_thread(ClientConnection connection)
 					std::unique_lock lock(oob_mutex);
 						//BEGIN: Writer Critical Section
 						// std::cout << "Adding new instrument\n";
-						Orders temp;
-						order_book[input.instrument] = std::make_shared<Orders>(temp);
+						order_book[input.instrument] = std::make_shared<Orders>();
 						Order order {input, timestamp++};
 						order_book[input.instrument]->sells.pq.insert(order);
 						Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
