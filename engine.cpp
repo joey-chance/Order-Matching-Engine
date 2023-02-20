@@ -155,8 +155,7 @@ void Engine::connection_thread(ClientConnection connection)
 							//Create Order
 							Order order {input, timestamp++};
 							//Insert order into Buys PQ
-							//TODO: Lock Buys.mutex
-							order_book[input.instrument]->buys.pq.insert(order); //write to order_book
+							order_book[input.instrument]->buys.pq.insert(order); //write to buys pq
 							Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
 							
 							auto ptr = std::make_shared<Order>(order);
