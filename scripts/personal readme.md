@@ -7,7 +7,7 @@
 ## To run grader, grader_README
 0. Note: I run on soctf-pdc-019
 1. run `./grader engine < <path to test case input>`
-2. eg: `./grader engine < scripts/./grader engine < scripts/concurrent-sell_then_concurrent_buy.in`
+2. eg: `./grader engine < ./grader engine < scripts/concurrent-buy_then_concurrent_sell_medium.in`
 
 Todo:
 0. Lock pqs when accessing
