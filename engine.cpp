@@ -61,10 +61,10 @@ struct Orders
 	std::mutex enqueue_mutex;
 };
 
-using Order_And_Set = std::pair<std::shared_ptr<Order>, Orders*>;
+using Order_And_Set = std::pair<std::shared_ptr<Order>, std::shared_ptr<Orders>>;
 
 static uint64_t timestamp = 0;
-static std::unordered_map<std::string, Orders*> order_book;
+static std::unordered_map<std::string, std::shared_ptr<Orders>> order_book;
 
 //Synchronization Variables for order_book
 std::shared_mutex oob_mutex;
@@ -101,7 +101,7 @@ void Engine::connection_thread(ClientConnection connection)
 					break;
 				}
 
-				Order_And_Set order_set = my_orders[input.order_id];
+				Order_And_Set order_set = my_orders[input.order_id]; //read my_orders
 				std::shared_ptr<Order> orderptr = order_set.first;
 				if (orderptr->info.type == input_buy) 
 				{
@@ -140,7 +140,7 @@ void Engine::connection_thread(ClientConnection connection)
 						//BEGIN: Writer Critical Section
 						//Create instrument orders
 						// std::cout << "Adding new instrument\n";
-						order_book[input.instrument] = new Orders(); //write order_book
+						order_book[input.instrument] = std::make_shared<Orders>(); //write order_book
 						//Create Order
 						Order order {input, timestamp++};
 						//Insert order into Buys PQ
@@ -157,7 +157,7 @@ void Engine::connection_thread(ClientConnection connection)
 					std::shared_lock lock(oob_mutex);
 						//BEGIN: Reader Critical Section
 						//Get list of resting orders for this instrument
-						Orders *orders = order_book[input.instrument];//read order_book
+						std::shared_ptr<Orders> orders = order_book[input.instrument];//read order_book
 						uint32_t execution_id = 1;
 						//Read sells order
 						//TODO: Lock instr sells mutex
@@ -211,7 +211,7 @@ void Engine::connection_thread(ClientConnection connection)
 					std::unique_lock lock(oob_mutex);
 						//BEGIN: Writer Critical Section
 						// std::cout << "Adding new instrument\n";
-						order_book[input.instrument] = new Orders();
+						order_book[input.instrument] = std::make_shared<Orders>();
 						Order order {input, timestamp++};
 						order_book[input.instrument]->sells.pq.insert(order);
 						Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
@@ -222,7 +222,7 @@ void Engine::connection_thread(ClientConnection connection)
 				{//Else, reader lock for matching
 					std::shared_lock lock(oob_mutex);
 						//BEGIN: Reader Critical Section
-						Orders *orders = order_book[input.instrument];
+						std::shared_ptr<Orders> orders = order_book[input.instrument];
 						uint32_t execution_id = 1;
 						while (!orders->buys.pq.empty() && input.count > 0) 
 						{
