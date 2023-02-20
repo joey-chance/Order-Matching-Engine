@@ -45,23 +45,20 @@ struct Order
 struct Buys
 {
 	std::set<Order> pq;
-	std::mutex match_mutex;
-	std::mutex execute_mutex;
-	std::mutex enqueue_mutex;
 };
 
 struct Sells
 {
 	std::set<Order, std::greater<Order> > pq;
-	std::mutex match_mutex;
-	std::mutex execute_mutex;
-	std::mutex enqueue_mutex;
 };
 
 struct Orders 
 {
 	Buys buys;
 	Sells sells;
+	std::mutex match_mutex;
+	std::mutex execute_mutex;
+	std::mutex enqueue_mutex;
 };
 
 using Order_And_Set = std::pair<std::shared_ptr<Order>, Orders*>;
