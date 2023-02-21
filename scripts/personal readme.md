@@ -9,16 +9,24 @@
 1. run `./grader engine < <path to test case input>`
 2. eg: `./grader engine < ./grader engine < scripts/concurrent-buy_then_concurrent_sell_medium.in`
 
+## To run run_all_basic.sh
+1. bash scripts/run_all_basic.sh
+
 Todo:
 0. Figure out a way to break instr concurr w/o instr locks (to test that instr locks are useful)
-1. Change to timestamp, execution_id std::atomic<int>
-2. Fix segfault on partial filling orders
+1. Change to timestamp,  std::atomic<int>
 
+
+Done:
+0. Fix segfault on partial filling orders
+1. Fix execution id bug
 
 
 Notes:
 
-1. Partial filling Orders cause segfault
+Deprecated Notes:
+
+1. (Solved) Partial filling Orders cause segfault
 2. There is shared mutex to do the synchronisation...no longer need my impl :(
 3. Error forced on soctf-pdc-019 (since it has 2*10 cores and 40 threads)
 	3b. (Now able to) Unable to force an error with 20 writers
