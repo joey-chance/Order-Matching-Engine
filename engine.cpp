@@ -18,6 +18,7 @@ struct Order
 {
 	ClientCommand info;
 	uint64_t time;
+	uint32_t execution_id;
 	bool operator==(const Order &other) const
 	{
 		return info.order_id == other.info.order_id;
@@ -153,7 +154,7 @@ void Engine::connection_thread(ClientConnection connection)
 							// std::cout << "Adding new instrument\n";
 							
 							//Create Order
-							Order order {input, timestamp++};
+							Order order {input, timestamp++, 0};
 							//Insert order into Buys PQ
 							order_book[input.instrument]->buys.pq.insert(order); //write to buys pq
 							Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
@@ -169,7 +170,6 @@ void Engine::connection_thread(ClientConnection connection)
 						//BEGIN: Reader Critical Section
 						//Get list of resting orders for this instrument
 						std::shared_ptr<Orders> orders = order_book[input.instrument];//read order_book
-						uint32_t execution_id = 1;
 						
 						{
 							std::unique_lock instr_lk(orders->instr_mtx);
@@ -188,12 +188,13 @@ void Engine::connection_thread(ClientConnection connection)
 									{
 										auto node = orders->sells.pq.extract(sell);
 										node.value().info.count -= input.count;
-										Output::OrderExecuted(node.value().info.order_id, input.order_id, execution_id++, node.value().info.price, input.count, timestamp++);
+										node.value().execution_id++;
+										Output::OrderExecuted(node.value().info.order_id, input.order_id, node.value().execution_id, node.value().info.price, input.count, timestamp++);
 										orders->sells.pq.insert(std::move(node));
 										input.count = 0;
 									} else {
 										input.count -= sell->info.count;
-										Output::OrderExecuted(sell->info.order_id, input.order_id, execution_id++, sell->info.price, sell->info.count, timestamp++);
+										Output::OrderExecuted(sell->info.order_id, input.order_id, ((sell->execution_id)+1), sell->info.price, sell->info.count, timestamp++);
 										orders->sells.pq.erase(sell);
 									}
 								}
@@ -202,7 +203,7 @@ void Engine::connection_thread(ClientConnection connection)
 							if (input.count > 0)
 							{
 								// Create new Buy order
-								Order order {input, timestamp++};
+								Order order {input, timestamp++, 0};
 								order_book[input.instrument]->buys.pq.insert(order);//read order_book
 								Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
 								auto ptr = std::make_shared<Order>(order);
@@ -233,7 +234,7 @@ void Engine::connection_thread(ClientConnection connection)
 						
 						{
 							std::unique_lock instr_lk((order_book[input.instrument])->instr_mtx);						
-							Order order {input, timestamp++};
+							Order order {input, timestamp++, 0};
 							order_book[input.instrument]->sells.pq.insert(order);
 							Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
 							auto ptr = std::make_shared<Order>(order);
@@ -246,7 +247,6 @@ void Engine::connection_thread(ClientConnection connection)
 					
 						//BEGIN: Reader Critical Section
 						std::shared_ptr<Orders> orders = order_book[input.instrument];
-						uint32_t execution_id = 1;
 						{
 							std::unique_lock instr_lk(orders->instr_mtx);
 
@@ -261,19 +261,20 @@ void Engine::connection_thread(ClientConnection connection)
 										{
 											auto node = orders->buys.pq.extract(buy);
 											node.value().info.count -= input.count;
-											Output::OrderExecuted(node.value().info.order_id, input.order_id, execution_id++, node.value().info.price, input.count, timestamp++);
+											node.value().execution_id++;
+											Output::OrderExecuted(node.value().info.order_id, input.order_id, node.value().execution_id, node.value().info.price, input.count, timestamp++);
 											orders->buys.pq.insert(std::move(node));
 											input.count = 0;
 										} else {
 											input.count -= buy->info.count;
-											Output::OrderExecuted(buy->info.order_id, input.order_id, execution_id++, buy->info.price, buy->info.count, timestamp++);
+											Output::OrderExecuted(buy->info.order_id, input.order_id, ((buy->execution_id)+1), buy->info.price, buy->info.count, timestamp++);
 											orders->buys.pq.erase(buy);
 										}
 									}
 								}
 								if (input.count > 0)
 								{
-									Order order {input, timestamp++};
+									Order order {input, timestamp++, 0};
 									order_book[input.instrument]->sells.pq.insert(order);
 									Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
 									auto ptr = std::make_shared<Order>(order);
