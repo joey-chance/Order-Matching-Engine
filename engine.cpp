@@ -188,8 +188,8 @@ void Engine::connection_thread(ClientConnection connection)
 									{
 										auto node = orders->sells.pq.extract(sell);
 										node.value().info.count -= input.count;
-										orders->sells.pq.insert(std::move(node));
 										Output::OrderExecuted(node.value().info.order_id, input.order_id, execution_id++, node.value().info.price, input.count, timestamp++);
+										orders->sells.pq.insert(std::move(node));
 										input.count = 0;
 									} else {
 										input.count -= sell->info.count;
@@ -201,7 +201,7 @@ void Engine::connection_thread(ClientConnection connection)
 							//Handle partially filled active buy order
 							if (input.count > 0)
 							{
-								//Create new Buy order
+								// Create new Buy order
 								Order order {input, timestamp++};
 								order_book[input.instrument]->buys.pq.insert(order);//read order_book
 								Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
@@ -261,8 +261,8 @@ void Engine::connection_thread(ClientConnection connection)
 										{
 											auto node = orders->buys.pq.extract(buy);
 											node.value().info.count -= input.count;
-											orders->buys.pq.insert(std::move(node));
 											Output::OrderExecuted(node.value().info.order_id, input.order_id, execution_id++, node.value().info.price, input.count, timestamp++);
+											orders->buys.pq.insert(std::move(node));
 											input.count = 0;
 										} else {
 											input.count -= buy->info.count;
