@@ -1,3 +1,4 @@
+#include <atomic>
 #include <iostream>
 #include <thread>
 #include <unordered_map>
@@ -65,7 +66,7 @@ struct Orders
 
 using Order_And_Set = std::pair<std::shared_ptr<Order>, std::shared_ptr<Orders>>;
 
-static uint64_t timestamp = 0;
+std::atomic<uint64_t> timestamp {0};
 static std::unordered_map<std::string, std::shared_ptr<Orders>> order_book;
 
 //Synchronization Variables for order_book
