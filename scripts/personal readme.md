@@ -13,18 +13,18 @@
 1. bash scripts/run_all_basic.sh
 
 Todo:
-0. Figure out a way to break instr concurr w/o instr locks (to test that instr locks are useful)
-1. Change to timestamp,  std::atomic<int>
-2. Run Valgrind memcheck (and fix the errors)
-3. Run Tsan (and fix the errors)
-4. Run Asan (and fix the errors)
-5. Run Helgrind (and fix the errors)
+
+1. Run Valgrind memcheck (and fix the errors)
+2. Run Tsan (and fix the errors)
+3. Run Asan (and fix the errors)
+4. Run Helgrind (and fix the errors)
 
 
 Done:
 0. Fix segfault on partial filling orders
 1. Fix execution id bug
-
+2. Figure out a way to break instr concurr w/o instr locks (to test that instr locks are useful)
+3. Change to timestamp,  std::atomic<int>
 
 Notes:
 1. New script to generate a bunch of similar orders (gen_test.sh)
