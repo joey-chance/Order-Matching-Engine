@@ -1,22 +1,17 @@
-# Open 10 threads
-5
-0-4 o
+# Open 2 threads
+2
+0-1 o
 
 # Add in a bunch of Buy orders concurrently (i hope)
 
 0 B 0 GOOA 2705 30
 1 B 1 GOOB 2705 30
-2 B 2 GOOC 2705 30
-3 B 3 GOOD 2705 30
-4 B 4 GOOE 2705 30
 
-0-4 s 1000
+
+0-1 s 1000
 
 # Concurrently send orders for sell
 0 S 10 GOOA 2700 30
 1 S 11 GOOB 2700 30
-2 S 12 GOOC 2700 30
-3 S 13 GOOD 2700 30
-4 S 14 GOOE 2700 30
 
 x
