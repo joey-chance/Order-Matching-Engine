@@ -29,7 +29,9 @@ Done:
 Notes:
 1. New script to generate a bunch of similar orders (gen_test.sh)
 2. `cat  instr_concurr_test_large_test.in | shuf > instr_concurr_test_large_randomised.in` shuf command to randomise sequence of orders
-3. instr_concurr_test_medium.in produces bug with buy added to order book when matchable sell in order book, fix in this commit
+3. instr_concurr_test_medium.in produces bug with buy added to order book when matchable sell in order book & vice versa, fix is in this commit
+4. instr_concurr_test_medium.in can also produce error occassionally when instr_lks are removed. Thus proving efficacy of instr_lk.
+
 
 Deprecated Notes:
 
