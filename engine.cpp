@@ -209,8 +209,6 @@ void Engine::connection_thread(ClientConnection connection)
 						
 						{
 							std::unique_lock instr_lk(orders->instr_mtx);
-							SyncCerr {}
-								<< "Order ID:" << input.order_id << " Sell empty:" << orders->sells.pq.empty() << std::endl;
 							//Read sells order
 							while (!orders->sells.pq.empty() && input.count > 0) 
 							{
