@@ -10,18 +10,19 @@
 2. eg: `./grader engine < ./grader engine < scripts/concurrent-buy_then_concurrent_sell_medium.in`
 
 ## To run run_all_basic.sh
+0. Ensure cd to scripts folder
 1. bash scripts/run_all_basic.sh
 
 ## To run test to break instrument concurrency
 0. Ensure cd to cs3211-assignment-... folder
-1. Run this 5-10 times to check `./grader engine < instr_concurr_test_medium.in`
-2. Run this 5-10times to check `./grader engine < instr_concurr_test_large_randomised.in`
+1. Run this 5-10 times to check `./grader engine < scripts/instr_concurr_test_medium.in`
+2. Run this 5-10times to check `./grader engine < scripts/instr_concurr_test_large_randomised.in`
 
 ## To run test to break orderbook concurrency
 0. Ensure cd to cs3211-assignment-... folder
-1. Run this 5 times to check `./grader engine < concurrent-buy_then_concurrent_sell_medium.in`
-2. Run this 5 times to check `./grader engine < concurrent-sell_then_concurrent_buy_medium.in`
-3. Run this 5 times to check `./grader engine < concurrent-sell_then_concurrent_buy_large.in`
+1. Run this 5 times to check `./grader engine < scripts/concurrent-buy_then_concurrent_sell_medium.in`
+2. Run this 5 times to check `./grader engine < scripts/concurrent-sell_then_concurrent_buy_medium.in`
+3. Run this 5 times to check `./grader engine < scripts/concurrent-sell_then_concurrent_buy_large.in`
 
 Todo:
 
