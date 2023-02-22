@@ -150,17 +150,53 @@ void Engine::connection_thread(ClientConnection connection)
 						}
 						{
 							std::unique_lock instr_lk((order_book[input.instrument])->instr_mtx);
-							//Create instrument orders
-							// std::cout << "Adding new instrument\n";
-							
-							//Create Order
-							Order order {input, timestamp++, 0};
-							//Insert order into Buys PQ
-							order_book[input.instrument]->buys.pq.insert(order); //write to buys pq
-							Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
-							
-							auto ptr = std::make_shared<Order>(order);
-							my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]); //read order_book
+							std::shared_ptr<Orders> orders = order_book[input.instrument];
+							//Double check if sells is not empty, sells might have created instr right before buys created instr
+							if (!orders->sells.pq.empty()) {
+								while (!orders->sells.pq.empty() && input.count > 0) 
+								{
+									if ((orders->sells.pq.begin())->info.price > input.price) {
+										//Best sell price too high for active buy, break
+										break;
+									} else 
+									{
+
+										auto sell = orders->sells.pq.begin();
+										if (input.count < sell->info.count)
+										{
+											auto node = orders->sells.pq.extract(sell);
+											node.value().info.count -= input.count;
+											node.value().execution_id++;
+											Output::OrderExecuted(node.value().info.order_id, input.order_id, node.value().execution_id, node.value().info.price, input.count, timestamp++);
+											orders->sells.pq.insert(std::move(node));
+											input.count = 0;
+										} else {
+											input.count -= sell->info.count;
+											Output::OrderExecuted(sell->info.order_id, input.order_id, ((sell->execution_id)+1), sell->info.price, sell->info.count, timestamp++);
+											orders->sells.pq.erase(sell);
+										}
+									}
+								}
+								//Handle partially filled active buy order
+								if (input.count > 0)
+								{
+									// Create new Buy order
+									Order order {input, timestamp++, 0};
+									order_book[input.instrument]->buys.pq.insert(order);//read order_book
+									Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
+									auto ptr = std::make_shared<Order>(order);
+									my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]); //read order_book
+								}
+							} else {
+								//Add Buy Order
+								Order order {input, timestamp++, 0};
+								//Insert order into Buys PQ
+								order_book[input.instrument]->buys.pq.insert(order); //write to buys pq
+								Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
+								
+								auto ptr = std::make_shared<Order>(order);
+								my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]); //read order_book
+							}
 						}
 						//END: Writer Critical Section
 
@@ -173,7 +209,8 @@ void Engine::connection_thread(ClientConnection connection)
 						
 						{
 							std::unique_lock instr_lk(orders->instr_mtx);
-							
+							SyncCerr {}
+								<< "Order ID:" << input.order_id << " Sell empty:" << orders->sells.pq.empty() << std::endl;
 							//Read sells order
 							while (!orders->sells.pq.empty() && input.count > 0) 
 							{
@@ -234,11 +271,47 @@ void Engine::connection_thread(ClientConnection connection)
 						
 						{
 							std::unique_lock instr_lk((order_book[input.instrument])->instr_mtx);						
-							Order order {input, timestamp++, 0};
-							order_book[input.instrument]->sells.pq.insert(order);
-							Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
-							auto ptr = std::make_shared<Order>(order);
-							my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
+							//Double check if buys is not empty, buys might have created instr right before sells created instr
+							std::shared_ptr<Orders> orders = order_book[input.instrument];
+							if (!orders->buys.pq.empty()) {
+								while (!orders->buys.pq.empty() && input.count > 0) 
+								{
+									if ((orders->buys.pq.begin())->info.price < input.price) {
+										break;
+									} else 
+									{
+										auto buy = orders->buys.pq.begin();
+										if (input.count < buy->info.count)
+										{
+											auto node = orders->buys.pq.extract(buy);
+											node.value().info.count -= input.count;
+											node.value().execution_id++;
+											Output::OrderExecuted(node.value().info.order_id, input.order_id, node.value().execution_id, node.value().info.price, input.count, timestamp++);
+											orders->buys.pq.insert(std::move(node));
+											input.count = 0;
+										} else {
+											input.count -= buy->info.count;
+											Output::OrderExecuted(buy->info.order_id, input.order_id, ((buy->execution_id)+1), buy->info.price, buy->info.count, timestamp++);
+											orders->buys.pq.erase(buy);
+										}
+									}
+								}
+								if (input.count > 0)
+								{
+									Order order {input, timestamp++, 0};
+									order_book[input.instrument]->sells.pq.insert(order);
+									Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
+									auto ptr = std::make_shared<Order>(order);
+									my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
+								}
+							} else {
+								//Add Sells Order
+								Order order {input, timestamp++, 0};
+								order_book[input.instrument]->sells.pq.insert(order);
+								Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
+								auto ptr = std::make_shared<Order>(order);
+								my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
+							}
 						}
 						//END: Writer Critical Section
 				} else 

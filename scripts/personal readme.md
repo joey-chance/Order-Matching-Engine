@@ -15,6 +15,10 @@
 Todo:
 0. Figure out a way to break instr concurr w/o instr locks (to test that instr locks are useful)
 1. Change to timestamp,  std::atomic<int>
+2. Run Valgrind memcheck (and fix the errors)
+3. Run Tsan (and fix the errors)
+4. Run Asan (and fix the errors)
+5. Run Helgrind (and fix the errors)
 
 
 Done:
@@ -23,6 +27,9 @@ Done:
 
 
 Notes:
+1. New script to generate a bunch of similar orders (gen_test.sh)
+2. `cat  instr_concurr_test_large_test.in | shuf > instr_concurr_test_large_randomised.in` shuf command to randomise sequence of orders
+3. instr_concurr_test_medium.in produces bug with buy added to order book when matchable sell in order book, fix in this commit
 
 Deprecated Notes:
 
