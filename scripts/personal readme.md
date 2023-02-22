@@ -12,6 +12,12 @@
 ## To run run_all_basic.sh
 1. bash scripts/run_all_basic.sh
 
+## To run test to break instrument concurrency
+0. Ensure cd to cs3211-assignment-... folder
+1. Run this 5-10 times to check `./grader engine < instr_concurr_test_medium.in`
+2. Run this 5-10times to check `./grader engine < instr_concurr_test_large_randomised.in`
+
+
 Todo:
 
 1. Run Valgrind memcheck (and fix the errors)
