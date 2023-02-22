@@ -17,6 +17,11 @@
 1. Run this 5-10 times to check `./grader engine < instr_concurr_test_medium.in`
 2. Run this 5-10times to check `./grader engine < instr_concurr_test_large_randomised.in`
 
+## To run test to break orderbook concurrency
+0. Ensure cd to cs3211-assignment-... folder
+1. Run this 5 times to check `./grader engine < concurrent-buy_then_concurrent_sell_medium.in`
+2. Run this 5 times to check `./grader engine < concurrent-sell_then_concurrent_buy_medium.in`
+3. Run this 5 times to check `./grader engine < concurrent-sell_then_concurrent_buy_large.in`
 
 Todo:
 
