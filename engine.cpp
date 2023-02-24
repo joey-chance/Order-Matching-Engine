@@ -11,6 +11,7 @@
 #include <memory>
 #include <algorithm>
 #include <shared_mutex>
+#include <condition_variable>
 
 #include "io.hpp"
 #include "engine.hpp"
@@ -59,13 +60,15 @@ using Order_And_Set = std::pair<std::shared_ptr<Order>, std::shared_ptr<Orders>>
 
 std::atomic<uint64_t> timestamp {0};
 static std::unordered_map<std::string, std::shared_ptr<Orders>> order_book;
+std::atomic<int> concurr_orders {0}; //at most 3
+std::atomic<bool> isBuySide {false};
 
 //Synchronization Variables for order_book
 std::shared_mutex oob_mutex;
 //END: Synchronization Variables for order_book 
 
 //Helper function declarations
-void cancel(CommandType, uint32_t, Order_And_Set&, std::unordered_map<int, Order_And_Set>&);
+// void cancel(CommandType, uint32_t, Order_And_Set&, std::unordered_map<int, Order_And_Set>&);
 //END: Helper function declarations
 void Engine::accept(ClientConnection connection)
 {
@@ -76,6 +79,7 @@ void Engine::accept(ClientConnection connection)
 void Engine::connection_thread(ClientConnection connection)
 {
 	std::unordered_map<int, Order_And_Set> my_orders;
+	std::condition_variable canEnter;
 	while(true)
 	{
 		ClientCommand input {};
@@ -99,12 +103,50 @@ void Engine::connection_thread(ClientConnection connection)
 
 				Order_And_Set order_set = my_orders[input.order_id]; //read my_orders
 				std::shared_ptr<Order> orderptr = order_set.first;
-				cancel(orderptr->info.type, input.order_id, order_set, my_orders);
-				break;
+				if (orderptr->info.type == input_buy) 
+				{
+					std::unique_lock match_lk((order_set.second)->match_mutex);
+						concurr_orders++; //implicit know it's < 3
+						bool exists = (order_set.second)->buys.contains(*orderptr.get());
+					std::unique_lock execute_lk((order_set.second)->execute_mutex);
+					match_lk.unlock();
+						if (exists) 
+						{
+							(order_set.second)->buys.erase(*orderptr.get());
+							Output::OrderDeleted(input.order_id, true, timestamp++);
+							concurr_orders--;
+							break;
+						} else
+						{
+							my_orders.erase(input.order_id);
+							Output::OrderDeleted(input.order_id, false, timestamp++);
+							concurr_orders--;
+							break;
+						}
+				} else 
+				{
+					std::unique_lock match_lk((order_set.second)->match_mutex);
+						concurr_orders++; //implicit know it's < 3
+						bool exists = (order_set.second)->sells.contains(*orderptr.get());
+					std::unique_lock execute_lk((order_set.second)->execute_mutex);
+					match_lk.unlock();
+						if (exists) 
+						{
+							(order_set.second)->sells.erase(*orderptr.get());
+							Output::OrderDeleted(input.order_id, true, timestamp++);
+							concurr_orders--;
+							break;
+						} else
+						{
+							my_orders.erase(input.order_id);
+							Output::OrderDeleted(input.order_id, false, timestamp++);
+							concurr_orders--;
+							break;
+						}
+				}
 			}
 			case input_buy: {
 				bool instr_exists;
-
 				{//Reader Lock, check if instr exists
 				std::shared_lock oob_r_lock(oob_mutex);
 					instr_exists = order_book.contains(input.instrument);
@@ -120,10 +162,19 @@ void Engine::connection_thread(ClientConnection connection)
 						order_book[input.instrument] = std::make_shared<Orders>(); //write order_book
 					}
 					{
-					std::unique_lock instr_lk((order_book[input.instrument])->instr_mtx);
+					std::unique_lock match_lk((order_book[input.instrument])->match_mutex);
+					while (!(concurr_orders == 0 || (concurr_orders < 3 && isBuySide))) 
+					{
+						canEnter.wait(match_lk);
+					}
+						isBuySide = true;
+						concurr_orders++;
 						std::shared_ptr<Orders> orders = order_book[input.instrument];
 						//Double check if sells is not empty, sells might have created instr right before buys created instr
 						// if (!orders->sells.empty()) {
+							//match_mutex is acquired
+							//TODO: implement Grab'N'Go. then canEnter.notify_all()
+						
 							while (!orders->sells.empty() && input.count > 0) 
 							{
 								if ((orders->sells.begin())->info.price > input.price) {
@@ -149,6 +200,7 @@ void Engine::connection_thread(ClientConnection connection)
 								}
 							}
 							//Handle partially filled active buy order
+							//TODO: acquire enqueue mutex. then release execute mutex
 							if (input.count > 0)
 							{
 								// Create new Buy order
@@ -158,16 +210,7 @@ void Engine::connection_thread(ClientConnection connection)
 								auto ptr = std::make_shared<Order>(order);
 								my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]); //read order_book
 							}
-						// } else {
-						// 	//Add Buy Order
-						// 	Order order {input, timestamp++, 0};
-						// 	//Insert order into Buys PQ
-						// 	order_book[input.instrument]->buys.insert(order); //write to buys pq
-						// 	Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
-							
-						// 	auto ptr = std::make_shared<Order>(order);
-						// 	my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]); //read order_book
-						// }
+							//TODO: concurr_orders-- when done
 					}
 					//END: Writer Critical Section
 
@@ -338,33 +381,44 @@ void Engine::connection_thread(ClientConnection connection)
 	}
 }
 
-void cancel(CommandType type, uint32_t order_id, Order_And_Set& order_set, std::unordered_map<int, Order_And_Set>& my_orders)
-{
-	std::shared_ptr<Order> orderptr = order_set.first;
-	if (type == input_buy)
-	{
-	std::unique_lock instr_lk((order_set.second)->instr_mtx);
-		if (!(order_set.second)->buys.contains(*orderptr.get())) {
-			// std::cout << "ORDER IS DELETED RIGHT BEFORE THIS\n";
-			my_orders.erase(order_id);
-			Output::OrderDeleted(order_id, false, timestamp++);
-			return;
-		}
-		(order_set.second)->buys.erase(*orderptr.get());
-		// std::cout << "HOORAYYY\n";
-		Output::OrderDeleted(order_id, true, timestamp++);
-	} else {
-	std::unique_lock instr_lk((order_set.second)->instr_mtx);
-		if (!(order_set.second)->sells.contains(*orderptr.get())) {
-			// std::cout << "ORDER IS DELETED RIGHT BEFORE THIS\n";
-			my_orders.erase(order_id);
-			Output::OrderDeleted(order_id, false, timestamp++);
-			return;
-		}
-		(order_set.second)->sells.erase(*orderptr.get());
-		Output::OrderDeleted(order_id, true, timestamp++);
-	}
-}
+// void cancel(CommandType type, uint32_t order_id, Order_And_Set& order_set, std::unordered_map<int, Order_And_Set>& my_orders)
+// {
+// 	std::shared_ptr<Order> orderptr = order_set.first;
+// 	if (type == input_buy)
+// 	{
+// 		std::unique_lock match_lk((order_set.second)->match_mutex);
+// 			bool exists = (order_set.second)->buys.contains(*orderptr.get());
+// 		std::unique_lock execute_lk((order_set.second)->execute_mutex);
+// 		match_lk.unlock();
+// 			if (!exists) 
+// 			{
+// 				my_orders.erase(order_id);
+// 				Output::OrderDeleted(order_id, false, timestamp++);
+// 				return;
+// 			} else 
+// 			{
+// 				(order_set.second)->buys.erase(*orderptr.get());
+// 				Output::OrderDeleted(order_id, true, timestamp++);
+// 				return;
+// 			}
+// 	} else {
+// 		std::unique_lock match_lk((order_set.second)->match_mutex);
+// 			bool exists = (order_set.second)->sells.contains(*orderptr.get());
+// 		std::unique_lock execute_lk((order_set.second)->execute_mutex);
+// 		match_lk.unlock();
+// 			if (!exists) 
+// 			{
+// 				my_orders.erase(order_id);
+// 				Output::OrderDeleted(order_id, false, timestamp++);
+// 				return;
+// 			} else 
+// 			{
+// 				(order_set.second)->sells.erase(*orderptr.get());
+// 				Output::OrderDeleted(order_id, true, timestamp++);
+// 				return;
+// 			}
+// 	}
+// }
 
 // Testing priority queue
 /*
