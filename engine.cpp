@@ -399,7 +399,13 @@ void Engine::connection_thread(ClientConnection connection)
 						for (auto buy: toMatch)
 						{
 							Output::OrderExecuted(buy.info.order_id, input.order_id, buy.execution_id, buy.info.price, std::min(input.count, buy.info.count), timestamp++);
-							input.count -= buy.info.count;
+							if (input.count < buy.info.count)
+							{
+								input.count = 0;
+							} else 
+							{
+								input.count -= buy.info.count;
+							}
 						}
 
 					std::unique_lock enqueue_lk(orders->enqueue_mutex);
@@ -479,7 +485,13 @@ void Engine::connection_thread(ClientConnection connection)
 						for (auto buy: toMatch)
 						{
 							Output::OrderExecuted(buy.info.order_id, input.order_id, buy.execution_id, buy.info.price, std::min(input.count, buy.info.count), timestamp++);
-							input.count -= buy.info.count;
+							if (input.count < buy.info.count)
+							{
+								input.count = 0;
+							} else 
+							{
+								input.count -= buy.info.count;
+							}
 						}
 
 					std::unique_lock enqueue_lk(orders->enqueue_mutex);
