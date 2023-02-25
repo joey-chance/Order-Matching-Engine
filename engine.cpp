@@ -211,6 +211,7 @@ void Engine::connection_thread(ClientConnection connection)
 									orders->sells.insert(std::move(node));
 								} else {
 									temp_count -= sell->info.count;
+									orders->sells.insert(std::move(node));
 									orders->sells.erase(sell);
 								}
 							}
@@ -290,6 +291,7 @@ void Engine::connection_thread(ClientConnection connection)
 									orders->sells.insert(std::move(node));
 								} else {
 									temp_count -= sell->info.count;
+									orders->sells.insert(std::move(node));
 									orders->sells.erase(sell);
 								}
 							}
@@ -383,6 +385,7 @@ void Engine::connection_thread(ClientConnection connection)
 									orders->buys.insert(std::move(node));
 								} else {
 									temp_count -= buy->info.count;
+									orders->buys.insert(std::move(node));
 									orders->buys.erase(buy);
 								}
 							}
@@ -462,6 +465,7 @@ void Engine::connection_thread(ClientConnection connection)
 									orders->buys.insert(std::move(node));
 								} else {
 									temp_count -= buy->info.count;
+									orders->buys.insert(std::move(node));
 									orders->buys.erase(buy);
 								}
 							}
