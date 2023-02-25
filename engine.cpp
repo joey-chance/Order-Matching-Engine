@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <shared_mutex>
 #include <condition_variable>
+#include <vector>
 
 #include "io.hpp"
 #include "engine.hpp"
@@ -55,13 +56,45 @@ struct Orders
 	std::mutex enqueue_mutex;
 	std::mutex instr_mtx;
 };
+/*
 
+TODO: paste on readme
+3 buy orders: B1, B2, B3
+3 stages: match, execute, enqueue
+
+	mutex     mutex        mutex
+	match     execute      enqueue
+T1: B1
+T2: B2        B1
+T3: B3        B2           B1
+...
+
+B1 is done matching. it releases match mutex. it tries to acquire execute mutex, but suddenly it gets context switched out
+B2 now matches. B2 finish matching. B2 can acquire execute mutex
+
+S1 --> B1
+B2 --> execute 
+
+B1 is done matching. Acquire execute mutex. Release match mutex.
+B2 really gets match mutex, B1 definitely already has the execute mutex.
+
+Thread 1: B1, CB1
+Thread 2: S1, CS1
+S1 --> B1
+	match     execute      enqueue
+T1: CS1
+T2: B1        CS1
+T3: 
+
+
+*/
 using Order_And_Set = std::pair<std::shared_ptr<Order>, std::shared_ptr<Orders>>;
 
 std::atomic<uint64_t> timestamp {0};
 static std::unordered_map<std::string, std::shared_ptr<Orders>> order_book;
 std::atomic<int> concurr_orders {0}; //at most 3
 std::atomic<bool> isBuySide {false};
+std::atomic<bool> isSellSide {false};
 
 //Synchronization Variables for order_book
 std::shared_mutex oob_mutex;
@@ -92,7 +125,8 @@ void Engine::connection_thread(ClientConnection connection)
 
 		switch(input.type)
 		{
-			case input_cancel: {
+			case input_cancel: 
+			{
 				SyncCerr {} << "Got cancel: ID: " << input.order_id << std::endl;
 
 				if (!my_orders.contains(input.order_id)) 
@@ -145,121 +179,171 @@ void Engine::connection_thread(ClientConnection connection)
 						}
 				}
 			}
-			case input_buy: {
+			case input_buy: 
+			{
 				bool instr_exists;
+				std::shared_ptr<Orders> orders;
 				{//Reader Lock, check if instr exists
 				std::shared_lock oob_r_lock(oob_mutex);
 					instr_exists = order_book.contains(input.instrument);
 				}
+				
 				if (!instr_exists)
 				{ //If instr does not exist, writer lock for order_book writing
 				std::unique_lock oob_w_lock(oob_mutex);
 					//BEGIN: Writer Critical Section
 					//Double check if instr does not exist
-					if (order_book.find(input.instrument) == order_book.end()) {
+					if (!order_book.contains(input.instrument)) 
+					{
 						//Create instrument orders
 						// std::cout << "Adding new instrument\n";
 						order_book[input.instrument] = std::make_shared<Orders>(); //write order_book
 					}
+					orders = order_book[input.instrument];
+				oob_w_lock.unlock();
 					{
-					std::unique_lock match_lk((order_book[input.instrument])->match_mutex);
-					while (!(concurr_orders == 0 || (concurr_orders < 3 && isBuySide))) 
-					{
-						canEnter.wait(match_lk);
-					}
+					//Match phase
+					std::unique_lock match_lk(orders->match_mutex);
+						while (!(concurr_orders == 0 || (concurr_orders < 3 && isBuySide))) 
+						{
+							canEnter.wait(match_lk);
+						}
 						isBuySide = true;
 						concurr_orders++;
-						std::shared_ptr<Orders> orders = order_book[input.instrument];
-						//Double check if sells is not empty, sells might have created instr right before buys created instr
-						// if (!orders->sells.empty()) {
-							//match_mutex is acquired
-							//TODO: implement Grab'N'Go. then canEnter.notify_all()
 						
-							while (!orders->sells.empty() && input.count > 0) 
+						//match_mutex is acquired
+						//TODO: implement Grab'N'Go. then canEnter.notify_all()
+						std::vector<Order> toMatch;
+						uint32_t temp_count = input.count;
+						while (!orders->sells.empty() && temp_count > 0) 
+						{
+							if ((orders->sells.begin())->info.price > input.price) 
 							{
-								if ((orders->sells.begin())->info.price > input.price) {
-									//Best sell price too high for active buy, break
-									break;
-								} else 
+								//Best sell price too high for active buy, break
+								break;
+							} else 
+							{
+								auto sell = orders->sells.begin();
+								auto node = orders->sells.extract(sell);
+								node.value().execution_id++;
+								toMatch.emplace_back(node.value());
+								if (temp_count < sell->info.count)
 								{
-
-									auto sell = orders->sells.begin();
-									if (input.count < sell->info.count)
-									{
-										auto node = orders->sells.extract(sell);
-										node.value().info.count -= input.count;
-										node.value().execution_id++;
-										Output::OrderExecuted(node.value().info.order_id, input.order_id, node.value().execution_id, node.value().info.price, input.count, timestamp++);
-										orders->sells.insert(std::move(node));
-										input.count = 0;
-									} else {
-										input.count -= sell->info.count;
-										Output::OrderExecuted(sell->info.order_id, input.order_id, ((sell->execution_id)+1), sell->info.price, sell->info.count, timestamp++);
-										orders->sells.erase(sell);
-									}
+									node.value().info.count -= temp_count;
+									orders->sells.insert(std::move(node));
+									temp_count = 0;
+								} else {
+									orders->sells.erase(sell);
+									temp_count -= sell->info.count;
 								}
 							}
-							//Handle partially filled active buy order
-							//TODO: acquire enqueue mutex. then release execute mutex
-							if (input.count > 0)
-							{
-								// Create new Buy order
-								Order order {input, timestamp++, 0};
-								order_book[input.instrument]->buys.insert(order);//read order_book
-								Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
-								auto ptr = std::make_shared<Order>(order);
-								my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]); //read order_book
-							}
-							//TODO: concurr_orders-- when done
+						}
+					std::unique_lock execute_lk(orders->execute_mutex);
+					match_lk.unlock();
+					canEnter.notify_one();
+					//Match phase end
+					//Execution phase begin
+
+						for (auto sell: toMatch)
+						{
+							Output::OrderExecuted(sell.info.order_id, input.order_id, sell.execution_id, sell.info.price, std::min(input.count, sell.info.count), timestamp++);
+							input.count -= sell.info.count;
+						}
+
+					std::unique_lock enqueue_lk(orders->enqueue_mutex);
+					execute_lk.unlock();
+					//Execution phase end
+					//Enqueue phase begin
+
+						if (input.count > 0)
+						{
+							// Create new Buy order
+							Order order {input, timestamp++, 0};
+							orders->buys.insert(order);
+							Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
+							auto ptr = std::make_shared<Order>(order);
+							my_orders[input.order_id] = Order_And_Set(ptr, orders);
+						}
+
+					concurr_orders--;
+					enqueue_lk.unlock();
+					//Enqueue phase end
 					}
 					//END: Writer Critical Section
 
 				} else 
 				{ //Else, reader lock for matching
 				std::shared_lock oob_r_lock(oob_mutex);
-					//BEGIN: Reader Critical Section
-					//Get list of resting orders for this instrument
+				//BEGIN: Reader Critical Section
+				//Get list of resting orders for this instrument
 					std::shared_ptr<Orders> orders = order_book[input.instrument];//read order_book
-					
+				oob_r_lock.unlock();
+				//END: Reader Critical Section
 					{
-					std::unique_lock instr_lk(orders->instr_mtx);
-						//Read sells order
-						while (!orders->sells.empty() && input.count > 0) 
+					//Match phase
+					std::unique_lock match_lk(orders->match_mutex);
+						while (!(concurr_orders == 0 || (concurr_orders < 3 && isBuySide))) 
 						{
-							if ((orders->sells.begin())->info.price > input.price) {
+							canEnter.wait(match_lk);
+						}
+						isBuySide = true;
+						concurr_orders++;
+						//match_mutex is acquired
+						//TODO: implement Grab'N'Go. then canEnter.notify_all()
+						std::vector<Order> toMatch;
+						uint32_t temp_count = input.count;
+						while (!orders->sells.empty() && temp_count > 0) 
+						{
+							if ((orders->sells.begin())->info.price > input.price) 
+							{
 								//Best sell price too high for active buy, break
 								break;
 							} else 
 							{
-
 								auto sell = orders->sells.begin();
-								if (input.count < sell->info.count)
+								auto node = orders->sells.extract(sell);
+								node.value().execution_id++;
+								toMatch.emplace_back(node.value());
+								if (temp_count < sell->info.count)
 								{
-									auto node = orders->sells.extract(sell);
-									node.value().info.count -= input.count;
-									node.value().execution_id++;
-									Output::OrderExecuted(node.value().info.order_id, input.order_id, node.value().execution_id, node.value().info.price, input.count, timestamp++);
+									node.value().info.count -= temp_count;
 									orders->sells.insert(std::move(node));
-									input.count = 0;
+									temp_count = 0;
 								} else {
-									input.count -= sell->info.count;
-									Output::OrderExecuted(sell->info.order_id, input.order_id, ((sell->execution_id)+1), sell->info.price, sell->info.count, timestamp++);
 									orders->sells.erase(sell);
+									temp_count -= sell->info.count;
 								}
 							}
 						}
-						//Handle partially filled active buy order
+					std::unique_lock execute_lk(orders->execute_mutex);
+					match_lk.unlock();
+					canEnter.notify_one();
+					//Match phase end
+					//Execution phase begin
+
+						for (auto sell: toMatch)
+						{
+							Output::OrderExecuted(sell.info.order_id, input.order_id, sell.execution_id, sell.info.price, std::min(input.count, sell.info.count), timestamp++);
+							input.count -= sell.info.count;
+						}
+
+					std::unique_lock enqueue_lk(orders->enqueue_mutex);
+					execute_lk.unlock();
+					//Execution phase end
+					//Enqueue phase begin
 						if (input.count > 0)
 						{
 							// Create new Buy order
 							Order order {input, timestamp++, 0};
-							order_book[input.instrument]->buys.insert(order);//read order_book
+							orders->buys.insert(order);
 							Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
 							auto ptr = std::make_shared<Order>(order);
-							my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]); //read order_book
+							my_orders[input.order_id] = Order_And_Set(ptr, orders);
 						}
+					concurr_orders--;
+					enqueue_lk.unlock();
+					//Enqueue phase end
 					}
-					//END: Reader Critical Section
 				}
 				break;
 			}
@@ -275,7 +359,8 @@ void Engine::connection_thread(ClientConnection connection)
 				std::unique_lock oob_w_lock(oob_mutex);
 					//BEGIN: Writer Critical Section
 					//Double check if instr does not exist
-					if (order_book.find(input.instrument) == order_book.end()) {
+					if (order_book.find(input.instrument) == order_book.end()) 
+					{
 						//Create instrument orders
 						// std::cout << "Adding new instrument\n";
 						order_book[input.instrument] = std::make_shared<Orders>();
@@ -288,7 +373,8 @@ void Engine::connection_thread(ClientConnection connection)
 						// if (!orders->buys.empty()) {
 							while (!orders->buys.empty() && input.count > 0) 
 							{
-								if ((orders->buys.begin())->info.price < input.price) {
+								if ((orders->buys.begin())->info.price < input.price) 
+								{
 									break;
 								} else 
 								{
@@ -337,7 +423,8 @@ void Engine::connection_thread(ClientConnection connection)
 
 						while (!orders->buys.empty() && input.count > 0) 
 						{
-							if ((orders->buys.begin())->info.price < input.price) {
+							if ((orders->buys.begin())->info.price < input.price) 
+							{
 								break;
 							} else 
 							{
@@ -350,7 +437,8 @@ void Engine::connection_thread(ClientConnection connection)
 									Output::OrderExecuted(node.value().info.order_id, input.order_id, node.value().execution_id, node.value().info.price, input.count, timestamp++);
 									orders->buys.insert(std::move(node));
 									input.count = 0;
-								} else {
+								} else 
+								{
 									input.count -= buy->info.count;
 									Output::OrderExecuted(buy->info.order_id, input.order_id, ((buy->execution_id)+1), buy->info.price, buy->info.count, timestamp++);
 									orders->buys.erase(buy);
