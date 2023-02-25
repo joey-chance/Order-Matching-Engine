@@ -19,15 +19,7 @@
 
 
 
-struct Orders 
-{
-	Buys buys;
-	Sells sells;
-	std::mutex match_mutex;
-	std::mutex execute_mutex;
-	std::mutex enqueue_mutex;
-	std::mutex instr_mtx;
-};
+
 /*
 
 TODO: paste on readme
@@ -60,10 +52,10 @@ T3:
 
 
 */
-using Order_And_Set = std::pair<std::shared_ptr<Order>, std::shared_ptr<Orders>>;
+
+std::shared_mutex oob_mutex;
 
 std::atomic<uint64_t> timestamp {0};
-static std::unordered_map<std::string, std::shared_ptr<Orders>> order_book;
 std::atomic<int> concurr_orders {0}; //at most 3
 std::atomic<bool> isBuySide {false};
 std::atomic<bool> isSellSide {false};
