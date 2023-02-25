@@ -15,54 +15,23 @@
 #include "io.hpp"
 #include "engine.hpp"
 
-struct Order
-{
-	ClientCommand info;
-	uint64_t time; //TODO: atomic?
-	uint32_t execution_id; //TODO: atomic? --> 1 order will update this at a time so it's ok
-	bool operator==(const Order &other) const
-	{
-		return info.order_id == other.info.order_id;
-	}
-	bool operator<(const Order& a) const
-	{
-		// Used for sorting Buys
-		if (info.price == a.info.price) 
-			return time < a.time;
 
-		return a.info.price < info.price;
-	}
-	bool operator>(const Order& a) const
-	{
-		// Used for sorting Sells
-		if (info.price == a.info.price) 
-			return time < a.time;
-		
-		return a.info.price > info.price;
-	}
-};
-
-using Buys = std::set<Order>;
-using Sells = std::set<Order, std::greater<Order> >;
-
-struct Orders 
-{
-	Buys buys;
-	Sells sells;
-	std::mutex match_mutex;
-	std::mutex execute_mutex;
-	std::mutex enqueue_mutex;
-	std::mutex instr_mtx;
-};
-
-using Order_And_Set = std::pair<std::shared_ptr<Order>, std::shared_ptr<Orders>>;
-
-std::atomic<uint64_t> timestamp {0};
-static std::unordered_map<std::string, std::shared_ptr<Orders>> order_book;
 
 //Synchronization Variables for order_book
 std::shared_mutex oob_mutex;
 //END: Synchronization Variables for order_book 
+
+
+std::atomic<uint64_t> timestamp {0};
+// static std::unordered_map<std::string, std::shared_ptr<Orders>> order_book;
+
+// Engine::Engine()
+// {
+// 	std::unique_lock oob_w_lock(oob_mutex);
+// 	std::unordered_map<std::string, std::shared_ptr<Orders>> Engine::order_book;
+// }
+
+
 
 //Helper function declarations
 void cancel(CommandType, uint32_t, Order_And_Set&, std::unordered_map<int, Order_And_Set>&);
@@ -71,7 +40,7 @@ void Engine::accept(ClientConnection connection)
 {
 	auto thread = std::thread(&Engine::connection_thread, this, std::move(connection));
 	thread.detach();
-}
+};
 
 void Engine::connection_thread(ClientConnection connection)
 {
@@ -158,16 +127,6 @@ void Engine::connection_thread(ClientConnection connection)
 								auto ptr = std::make_shared<Order>(order);
 								my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]); //read order_book
 							}
-						// } else {
-						// 	//Add Buy Order
-						// 	Order order {input, timestamp++, 0};
-						// 	//Insert order into Buys PQ
-						// 	order_book[input.instrument]->buys.insert(order); //write to buys pq
-						// 	Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
-							
-						// 	auto ptr = std::make_shared<Order>(order);
-						// 	my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]); //read order_book
-						// }
 					}
 					//END: Writer Critical Section
 
@@ -273,14 +232,6 @@ void Engine::connection_thread(ClientConnection connection)
 								auto ptr = std::make_shared<Order>(order);
 								my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
 							}
-						// } else {
-						// 	//Add Sells Order
-						// 	Order order {input, timestamp++, 0};
-						// 	order_book[input.instrument]->sells.insert(order);
-						// 	Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
-						// 	auto ptr = std::make_shared<Order>(order);
-						// 	my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
-						// }
 					}
 					//END: Writer Critical Section
 				} else 
