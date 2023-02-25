@@ -24,6 +24,21 @@
 2. Run this 5 times to check `./grader engine < scripts/concurrent-sell_then_concurrent_buy_medium.in`
 3. Run this 5 times to check `./grader engine < scripts/concurrent-sell_then_concurrent_buy_large.in`
 
+## To compile & run custom runner
+### Compile custom_runner
+1. cd to scripts/custom_runner folder
+2. clang++ -g -O3 -Wall -Wextra -pedantic -Werror -std=c++20 -pthread custom_runner.cpp
+### Run custom_runner
+1. Open 2 Shells
+2. In Shell 1:
+	2a. `./engine socket`
+3. In Shell 2:
+	3a. cd to custom_runner folder
+	3b. `./a.out ../../socket <any number of input files>`
+		eg. `./a.out ../../socket small_multi/c1.in`
+		eg. `./a.out ../../socket large_multi/c1.in large_multi/c2.in`
+
+
 Todo:
 
 1. Run Valgrind memcheck (and fix the errors)
