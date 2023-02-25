@@ -73,7 +73,7 @@ void Engine::connection_thread(ClientConnection connection)
 			}
 			case input_buy: {
 				bool instr_exists;
-
+				std::shared_ptr<Orders> orders;
 				{//Reader Lock, check if instr exists
 				std::shared_lock oob_r_lock(oob_mutex);
 					instr_exists = order_book.contains(input.instrument);
@@ -88,9 +88,10 @@ void Engine::connection_thread(ClientConnection connection)
 						// std::cout << "Adding new instrument\n";
 						order_book[input.instrument] = std::make_shared<Orders>(); //write order_book
 					}
+					orders = order_book[input.instrument];
+				oob_w_lock.unlock();
 					{
-					std::unique_lock instr_lk((order_book[input.instrument])->instr_mtx);
-						std::shared_ptr<Orders> orders = order_book[input.instrument];
+					std::unique_lock instr_lk(orders->instr_mtx);
 						//Double check if sells is not empty, sells might have created instr right before buys created instr
 						// if (!orders->sells.empty()) {
 							while (!orders->sells.empty() && input.count > 0) 
@@ -122,10 +123,10 @@ void Engine::connection_thread(ClientConnection connection)
 							{
 								// Create new Buy order
 								Order order {input, timestamp++, 0};
-								order_book[input.instrument]->buys.insert(order);//read order_book
+								orders->buys.insert(order);//read order_book
 								Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
 								auto ptr = std::make_shared<Order>(order);
-								my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]); //read order_book
+								my_orders[input.order_id] = Order_And_Set(ptr, orders); //read order_book
 							}
 					}
 					//END: Writer Critical Section
@@ -135,8 +136,8 @@ void Engine::connection_thread(ClientConnection connection)
 				std::shared_lock oob_r_lock(oob_mutex);
 					//BEGIN: Reader Critical Section
 					//Get list of resting orders for this instrument
-					std::shared_ptr<Orders> orders = order_book[input.instrument];//read order_book
-					
+					orders = order_book[input.instrument];//read order_book
+				oob_r_lock.unlock();
 					{
 					std::unique_lock instr_lk(orders->instr_mtx);
 						//Read sells order
@@ -169,10 +170,10 @@ void Engine::connection_thread(ClientConnection connection)
 						{
 							// Create new Buy order
 							Order order {input, timestamp++, 0};
-							order_book[input.instrument]->buys.insert(order);//read order_book
+							orders->buys.insert(order);//read order_book
 							Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, false, order.time);
 							auto ptr = std::make_shared<Order>(order);
-							my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]); //read order_book
+							my_orders[input.order_id] = Order_And_Set(ptr, orders); //read order_book
 						}
 					}
 					//END: Reader Critical Section
@@ -181,7 +182,7 @@ void Engine::connection_thread(ClientConnection connection)
 			}
 			case input_sell: {
 				bool instr_exists;
-
+				std::shared_ptr<Orders> orders;
 				{//Reader Lock, check if instr exists
 				std::shared_lock lock(oob_mutex);
 					instr_exists = order_book.contains(input.instrument);
@@ -196,10 +197,10 @@ void Engine::connection_thread(ClientConnection connection)
 						// std::cout << "Adding new instrument\n";
 						order_book[input.instrument] = std::make_shared<Orders>();
 					}
-					
+					orders = order_book[input.instrument];
+				oob_w_lock.unlock();
 					{
-					std::unique_lock instr_lk((order_book[input.instrument])->instr_mtx);						
-						std::shared_ptr<Orders> orders = order_book[input.instrument];
+					std::unique_lock instr_lk((orders)->instr_mtx);						
 						//Double check if buys is not empty, buys might have created instr right before sells created instr
 						// if (!orders->buys.empty()) {
 							while (!orders->buys.empty() && input.count > 0) 
@@ -227,10 +228,10 @@ void Engine::connection_thread(ClientConnection connection)
 							if (input.count > 0)
 							{
 								Order order {input, timestamp++, 0};
-								order_book[input.instrument]->sells.insert(order);
+								orders->sells.insert(order);
 								Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
 								auto ptr = std::make_shared<Order>(order);
-								my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
+								my_orders[input.order_id] = Order_And_Set(ptr, orders);
 							}
 					}
 					//END: Writer Critical Section
@@ -239,7 +240,8 @@ void Engine::connection_thread(ClientConnection connection)
 				std::unique_lock oob_r_lock(oob_mutex);
 				
 					//BEGIN: Reader Critical Section
-					std::shared_ptr<Orders> orders = order_book[input.instrument];
+					orders = order_book[input.instrument];
+				oob_r_lock.unlock();
 					{
 					std::unique_lock instr_lk(orders->instr_mtx);
 
@@ -268,10 +270,10 @@ void Engine::connection_thread(ClientConnection connection)
 						if (input.count > 0)
 						{
 							Order order {input, timestamp++, 0};
-							order_book[input.instrument]->sells.insert(order);
+							orders->sells.insert(order);
 							Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
 							auto ptr = std::make_shared<Order>(order);
-							my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
+							my_orders[input.order_id] = Order_And_Set(ptr, orders);
 						}
 					}
 					//END: Reader Critical Section
