@@ -17,35 +17,7 @@
 #include "io.hpp"
 #include "engine.hpp"
 
-struct Order
-{
-	ClientCommand info;
-	uint64_t time; //TODO: atomic?
-	uint32_t execution_id; //TODO: atomic? --> 1 order will update this at a time so it's ok
-	bool operator==(const Order &other) const
-	{
-		return info.order_id == other.info.order_id;
-	}
-	bool operator<(const Order& a) const
-	{
-		// Used for sorting Buys
-		if (info.price == a.info.price) 
-			return time < a.time;
 
-		return a.info.price < info.price;
-	}
-	bool operator>(const Order& a) const
-	{
-		// Used for sorting Sells
-		if (info.price == a.info.price) 
-			return time < a.time;
-		
-		return a.info.price > info.price;
-	}
-};
-
-using Buys = std::set<Order>;
-using Sells = std::set<Order, std::greater<Order> >;
 
 struct Orders 
 {
@@ -96,9 +68,6 @@ std::atomic<int> concurr_orders {0}; //at most 3
 std::atomic<bool> isBuySide {false};
 std::atomic<bool> isSellSide {false};
 
-//Synchronization Variables for order_book
-std::shared_mutex oob_mutex;
-//END: Synchronization Variables for order_book 
 
 //Helper function declarations
 // void cancel(CommandType, uint32_t, Order_And_Set&, std::unordered_map<int, Order_And_Set>&);
@@ -107,7 +76,7 @@ void Engine::accept(ClientConnection connection)
 {
 	auto thread = std::thread(&Engine::connection_thread, this, std::move(connection));
 	thread.detach();
-}
+};
 
 void Engine::connection_thread(ClientConnection connection)
 {
@@ -402,14 +371,6 @@ void Engine::connection_thread(ClientConnection connection)
 								auto ptr = std::make_shared<Order>(order);
 								my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
 							}
-						// } else {
-						// 	//Add Sells Order
-						// 	Order order {input, timestamp++, 0};
-						// 	order_book[input.instrument]->sells.insert(order);
-						// 	Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
-						// 	auto ptr = std::make_shared<Order>(order);
-						// 	my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
-						// }
 					}
 					//END: Writer Critical Section
 				} else 
