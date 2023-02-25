@@ -58,7 +58,19 @@ std::shared_mutex oob_mutex;
 std::atomic<uint64_t> timestamp {0};
 std::atomic<int> concurr_orders {0}; //at most 3
 std::atomic<bool> isBuySide {false};
-std::atomic<bool> isSellSide {false};
+/*
+Thread 1: C1, B1
+Thread 2: C2
+Thread 3: C3
+
+	match     execute      enqueue
+T1: C1
+T2: C2        C1
+T3: C3        C2           ..
+T4: B1        C3           ..
+
+isBuySide -> false
+*/
 
 
 //Helper function declarations
@@ -68,7 +80,7 @@ void Engine::accept(ClientConnection connection)
 {
 	auto thread = std::thread(&Engine::connection_thread, this, std::move(connection));
 	thread.detach();
-};
+}
 
 void Engine::connection_thread(ClientConnection connection)
 {
@@ -107,15 +119,15 @@ void Engine::connection_thread(ClientConnection connection)
 					match_lk.unlock();
 						if (exists) 
 						{
-							(order_set.second)->buys.erase(*orderptr.get());
 							Output::OrderDeleted(input.order_id, true, timestamp++);
 							concurr_orders--;
+							(order_set.second)->buys.erase(*orderptr.get());
 							break;
 						} else
 						{
-							my_orders.erase(input.order_id);
 							Output::OrderDeleted(input.order_id, false, timestamp++);
 							concurr_orders--;
+							my_orders.erase(input.order_id);
 							break;
 						}
 				} else 
@@ -127,15 +139,15 @@ void Engine::connection_thread(ClientConnection connection)
 					match_lk.unlock();
 						if (exists) 
 						{
-							(order_set.second)->sells.erase(*orderptr.get());
 							Output::OrderDeleted(input.order_id, true, timestamp++);
 							concurr_orders--;
+							(order_set.second)->sells.erase(*orderptr.get());
 							break;
 						} else
 						{
-							my_orders.erase(input.order_id);
 							Output::OrderDeleted(input.order_id, false, timestamp++);
 							concurr_orders--;
+							my_orders.erase(input.order_id);
 							break;
 						}
 				}
@@ -165,11 +177,15 @@ void Engine::connection_thread(ClientConnection connection)
 					{
 					//Match phase
 					std::unique_lock match_lk(orders->match_mutex);
-						while (!(concurr_orders == 0 || (concurr_orders < 3 && isBuySide))) 
+						int concurr_orders_now = concurr_orders.load();
+						bool isBuySideNow = isBuySide.load();
+						while (!(concurr_orders_now == 0 || (concurr_orders_now < 3 && isBuySideNow))) 
 						{
 							canEnter.wait(match_lk);
 						}
-						isBuySide = true;
+						//acquired match mutex
+						//buy order and a sell order reach here at the same time
+						isBuySide.store(true);
 						concurr_orders++;
 						
 						//match_mutex is acquired
@@ -191,11 +207,11 @@ void Engine::connection_thread(ClientConnection connection)
 								if (temp_count < sell->info.count)
 								{
 									node.value().info.count -= temp_count;
-									orders->sells.insert(std::move(node));
 									temp_count = 0;
+									orders->sells.insert(std::move(node));
 								} else {
-									orders->sells.erase(sell);
 									temp_count -= sell->info.count;
+									orders->sells.erase(sell);
 								}
 							}
 						}
@@ -243,11 +259,13 @@ void Engine::connection_thread(ClientConnection connection)
 					{
 					//Match phase
 					std::unique_lock match_lk(orders->match_mutex);
-						while (!(concurr_orders == 0 || (concurr_orders < 3 && isBuySide))) 
+						int concurr_orders_now = concurr_orders.load();
+						bool isBuySideNow = isBuySide.load();
+						while (!(concurr_orders_now == 0 || (concurr_orders_now < 3 && isBuySideNow))) 
 						{
 							canEnter.wait(match_lk);
 						}
-						isBuySide = true;
+						isBuySide.store(true);
 						concurr_orders++;
 						//match_mutex is acquired
 						//TODO: implement Grab'N'Go. then canEnter.notify_all()
@@ -268,11 +286,11 @@ void Engine::connection_thread(ClientConnection connection)
 								if (temp_count < sell->info.count)
 								{
 									node.value().info.count -= temp_count;
-									orders->sells.insert(std::move(node));
 									temp_count = 0;
+									orders->sells.insert(std::move(node));
 								} else {
-									orders->sells.erase(sell);
 									temp_count -= sell->info.count;
+									orders->sells.erase(sell);
 								}
 							}
 						}
@@ -308,106 +326,175 @@ void Engine::connection_thread(ClientConnection connection)
 				}
 				break;
 			}
-			case input_sell: {
+			case input_sell: 
+			{
 				bool instr_exists;
-
+				std::shared_ptr<Orders> orders;
 				{//Reader Lock, check if instr exists
-				std::shared_lock lock(oob_mutex);
+				std::shared_lock oob_r_lock(oob_mutex);
 					instr_exists = order_book.contains(input.instrument);
 				}
+				
 				if (!instr_exists)
 				{ //If instr does not exist, writer lock for order_book writing
 				std::unique_lock oob_w_lock(oob_mutex);
 					//BEGIN: Writer Critical Section
 					//Double check if instr does not exist
-					if (order_book.find(input.instrument) == order_book.end()) 
+					if (!order_book.contains(input.instrument)) 
 					{
 						//Create instrument orders
 						// std::cout << "Adding new instrument\n";
-						order_book[input.instrument] = std::make_shared<Orders>();
+						order_book[input.instrument] = std::make_shared<Orders>(); //write order_book
 					}
-					
+					orders = order_book[input.instrument];
+				oob_w_lock.unlock();
 					{
-					std::unique_lock instr_lk((order_book[input.instrument])->instr_mtx);						
-						std::shared_ptr<Orders> orders = order_book[input.instrument];
-						//Double check if buys is not empty, buys might have created instr right before sells created instr
-						// if (!orders->buys.empty()) {
-							while (!orders->buys.empty() && input.count > 0) 
-							{
-								if ((orders->buys.begin())->info.price < input.price) 
-								{
-									break;
-								} else 
-								{
-									auto buy = orders->buys.begin();
-									if (input.count < buy->info.count)
-									{
-										auto node = orders->buys.extract(buy);
-										node.value().info.count -= input.count;
-										node.value().execution_id++;
-										Output::OrderExecuted(node.value().info.order_id, input.order_id, node.value().execution_id, node.value().info.price, input.count, timestamp++);
-										orders->buys.insert(std::move(node));
-										input.count = 0;
-									} else {
-										input.count -= buy->info.count;
-										Output::OrderExecuted(buy->info.order_id, input.order_id, ((buy->execution_id)+1), buy->info.price, buy->info.count, timestamp++);
-										orders->buys.erase(buy);
-									}
-								}
-							}
-							if (input.count > 0)
-							{
-								Order order {input, timestamp++, 0};
-								order_book[input.instrument]->sells.insert(order);
-								Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
-								auto ptr = std::make_shared<Order>(order);
-								my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
-							}
-					}
-					//END: Writer Critical Section
-				} else 
-				{//Else, reader lock for matching
-				std::unique_lock oob_r_lock(oob_mutex);
-				
-					//BEGIN: Reader Critical Section
-					std::shared_ptr<Orders> orders = order_book[input.instrument];
-					{
-					std::unique_lock instr_lk(orders->instr_mtx);
-
-						while (!orders->buys.empty() && input.count > 0) 
+					//Match phase
+					std::unique_lock match_lk(orders->match_mutex);
+						int concurr_orders_now = concurr_orders.load();
+						bool isBuySideNow = isBuySide.load();
+						while (!(concurr_orders_now == 0 || (concurr_orders_now < 3 && !isBuySideNow))) 
+						{
+							canEnter.wait(match_lk);
+						}
+						isBuySide.store(false);
+						concurr_orders++;
+						
+						//match_mutex is acquired
+						//TODO: implement Grab'N'Go. then canEnter.notify_all()
+						std::vector<Order> toMatch;
+						uint32_t temp_count = input.count;
+						while (!orders->buys.empty() && temp_count > 0) 
 						{
 							if ((orders->buys.begin())->info.price < input.price) 
 							{
+								//Best buy price too low for active sell, break
 								break;
 							} else 
 							{
 								auto buy = orders->buys.begin();
-								if (input.count < buy->info.count)
+								auto node = orders->buys.extract(buy);
+								node.value().execution_id++;
+								toMatch.emplace_back(node.value());
+								if (temp_count < buy->info.count)
 								{
-									auto node = orders->buys.extract(buy);
-									node.value().info.count -= input.count;
-									node.value().execution_id++;
-									Output::OrderExecuted(node.value().info.order_id, input.order_id, node.value().execution_id, node.value().info.price, input.count, timestamp++);
+									node.value().info.count -= temp_count;
+									temp_count = 0;
 									orders->buys.insert(std::move(node));
-									input.count = 0;
-								} else 
-								{
-									input.count -= buy->info.count;
-									Output::OrderExecuted(buy->info.order_id, input.order_id, ((buy->execution_id)+1), buy->info.price, buy->info.count, timestamp++);
+								} else {
+									temp_count -= buy->info.count;
 									orders->buys.erase(buy);
 								}
 							}
 						}
+					std::unique_lock execute_lk(orders->execute_mutex);
+					match_lk.unlock();
+					canEnter.notify_one();
+					//Match phase end
+					//Execution phase begin
+
+						for (auto buy: toMatch)
+						{
+							Output::OrderExecuted(buy.info.order_id, input.order_id, buy.execution_id, buy.info.price, std::min(input.count, buy.info.count), timestamp++);
+							input.count -= buy.info.count;
+						}
+
+					std::unique_lock enqueue_lk(orders->enqueue_mutex);
+					execute_lk.unlock();
+					//Execution phase end
+					//Enqueue phase begin
+
 						if (input.count > 0)
 						{
+							// Create new Sell order
 							Order order {input, timestamp++, 0};
-							order_book[input.instrument]->sells.insert(order);
+							orders->sells.insert(order);
 							Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
 							auto ptr = std::make_shared<Order>(order);
-							my_orders[input.order_id] = Order_And_Set(ptr, order_book[input.instrument]);
+							my_orders[input.order_id] = Order_And_Set(ptr, orders);
 						}
+
+					concurr_orders--;
+					enqueue_lk.unlock();
+					//Enqueue phase end
 					}
-					//END: Reader Critical Section
+					//END: Writer Critical Section
+
+				} else 
+				{ //Else, reader lock for matching
+				std::shared_lock oob_r_lock(oob_mutex);
+				//BEGIN: Reader Critical Section
+				//Get list of resting orders for this instrument
+					std::shared_ptr<Orders> orders = order_book[input.instrument];//read order_book
+				oob_r_lock.unlock();
+				//END: Reader Critical Section
+					{
+					//Match phase
+					std::unique_lock match_lk(orders->match_mutex);
+						int concurr_orders_now = concurr_orders.load();
+						bool isBuySideNow = isBuySide.load();
+						while (!(concurr_orders_now == 0 || (concurr_orders_now < 3 && !isBuySideNow))) 
+						{
+							canEnter.wait(match_lk);
+						}
+						isBuySide.store(false);
+						concurr_orders++;
+						//match_mutex is acquired
+						//TODO: implement Grab'N'Go. then canEnter.notify_all()
+						std::vector<Order> toMatch;
+						uint32_t temp_count = input.count;
+						while (!orders->buys.empty() && temp_count > 0) 
+						{
+							if ((orders->buys.begin())->info.price < input.price) 
+							{
+								//Best sell price too high for active buy, break
+								break;
+							} else 
+							{
+								auto buy = orders->buys.begin();
+								auto node = orders->buys.extract(buy);
+								node.value().execution_id++;
+								toMatch.emplace_back(node.value());
+								if (temp_count < buy->info.count)
+								{
+									node.value().info.count -= temp_count;
+									temp_count = 0;
+									orders->buys.insert(std::move(node));
+								} else {
+									temp_count -= buy->info.count;
+									orders->buys.erase(buy);
+								}
+							}
+						}
+					std::unique_lock execute_lk(orders->execute_mutex);
+					match_lk.unlock();
+					canEnter.notify_one();
+					//Match phase end
+					//Execution phase begin
+
+						for (auto buy: toMatch)
+						{
+							Output::OrderExecuted(buy.info.order_id, input.order_id, buy.execution_id, buy.info.price, std::min(input.count, buy.info.count), timestamp++);
+							input.count -= buy.info.count;
+						}
+
+					std::unique_lock enqueue_lk(orders->enqueue_mutex);
+					execute_lk.unlock();
+					//Execution phase end
+					//Enqueue phase begin
+						if (input.count > 0)
+						{
+							// Create new Sell order
+							Order order {input, timestamp++, 0};
+							orders->sells.insert(order);
+							Output::OrderAdded(input.order_id, input.instrument, input.price, input.count, true, order.time);
+							auto ptr = std::make_shared<Order>(order);
+							my_orders[input.order_id] = Order_And_Set(ptr, orders);
+						}
+					concurr_orders--;
+					enqueue_lk.unlock();
+					//Enqueue phase end
+					}
 				}
 				break;
 			}
@@ -421,82 +508,3 @@ void Engine::connection_thread(ClientConnection connection)
 		}
 	}
 }
-
-// void cancel(CommandType type, uint32_t order_id, Order_And_Set& order_set, std::unordered_map<int, Order_And_Set>& my_orders)
-// {
-// 	std::shared_ptr<Order> orderptr = order_set.first;
-// 	if (type == input_buy)
-// 	{
-// 		std::unique_lock match_lk((order_set.second)->match_mutex);
-// 			bool exists = (order_set.second)->buys.contains(*orderptr.get());
-// 		std::unique_lock execute_lk((order_set.second)->execute_mutex);
-// 		match_lk.unlock();
-// 			if (!exists) 
-// 			{
-// 				my_orders.erase(order_id);
-// 				Output::OrderDeleted(order_id, false, timestamp++);
-// 				return;
-// 			} else 
-// 			{
-// 				(order_set.second)->buys.erase(*orderptr.get());
-// 				Output::OrderDeleted(order_id, true, timestamp++);
-// 				return;
-// 			}
-// 	} else {
-// 		std::unique_lock match_lk((order_set.second)->match_mutex);
-// 			bool exists = (order_set.second)->sells.contains(*orderptr.get());
-// 		std::unique_lock execute_lk((order_set.second)->execute_mutex);
-// 		match_lk.unlock();
-// 			if (!exists) 
-// 			{
-// 				my_orders.erase(order_id);
-// 				Output::OrderDeleted(order_id, false, timestamp++);
-// 				return;
-// 			} else 
-// 			{
-// 				(order_set.second)->sells.erase(*orderptr.get());
-// 				Output::OrderDeleted(order_id, true, timestamp++);
-// 				return;
-// 			}
-// 	}
-// }
-
-// Testing priority queue
-/*
-ClientCommand input {};
-	connection.readInput(input);
-	ClientCommand input1 {input_buy, order_id++, 5, 2, "AAPL"};
-	Order order1 {input1, 3};
-	ClientCommand input2 {input_buy, order_id++, 1, 1, "AAPL"};
-	Order order2 {input2, 3};
-	ClientCommand input3 {input_buy, order_id++, 1, 3, "AAPL"};
-	Order order3 {input3, 2};
-	ClientCommand input4 {input_buy, order_id++, 5, 4, "AAPL"};
-	Order order4 {input4, 1};
-	Buys buys;
-	buys.insert(order1);
-	buys.insert(order2);
-	buys.insert(order3);
-	buys.insert(order4);
-	Order top = *buys.begin();
-	std::cout << top.info.price << top.info.count << std::endl;
-	Sells sells;
-	sells.insert(order2);
-	sells.insert(order1);
-	sells.insert(order3);
-	sells.insert(order4);
-	Order bottom = *sells.begin();
-	std::cout << bottom.info.price << bottom.info.count << std::endl;
-	return;
-*/
-
-//To test the data structures
-/*
-ClientCommand cmd {input_buy, 125, 1, 1, "AAPL"};
-Order order {cmd, 1};
-order_book["AAPL"] = new Orders();
-(*order_book["AAPL"]).buys.insert(order);
-auto ptr = std::make_shared<Order>(order);
-std::weak_ptr<Order> wptr = ptr;
-my_orders[125] = std::pair<std::weak_ptr<Order>, Orders*>(wptr, order_book["AAPL"]);
-*/
