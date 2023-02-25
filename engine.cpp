@@ -225,7 +225,14 @@ void Engine::connection_thread(ClientConnection connection)
 						for (auto sell: toMatch)
 						{
 							Output::OrderExecuted(sell.info.order_id, input.order_id, sell.execution_id, sell.info.price, std::min(input.count, sell.info.count), timestamp++);
-							input.count -= sell.info.count;
+							if (input.count < sell.info.count)
+							{
+								input.count = 0;
+								break;
+							} else 
+							{
+								input.count -= sell.info.count;
+							}
 						}
 
 					std::unique_lock enqueue_lk(orders->enqueue_mutex);
@@ -305,7 +312,14 @@ void Engine::connection_thread(ClientConnection connection)
 						for (auto sell: toMatch)
 						{
 							Output::OrderExecuted(sell.info.order_id, input.order_id, sell.execution_id, sell.info.price, std::min(input.count, sell.info.count), timestamp++);
-							input.count -= sell.info.count;
+							if (input.count < sell.info.count)
+							{
+								input.count = 0;
+								break;
+							} else 
+							{
+								input.count -= sell.info.count;
+							}
 						}
 
 					std::unique_lock enqueue_lk(orders->enqueue_mutex);
@@ -402,6 +416,7 @@ void Engine::connection_thread(ClientConnection connection)
 							if (input.count < buy.info.count)
 							{
 								input.count = 0;
+								break;
 							} else 
 							{
 								input.count -= buy.info.count;
@@ -488,6 +503,7 @@ void Engine::connection_thread(ClientConnection connection)
 							if (input.count < buy.info.count)
 							{
 								input.count = 0;
+								break;
 							} else 
 							{
 								input.count -= buy.info.count;
