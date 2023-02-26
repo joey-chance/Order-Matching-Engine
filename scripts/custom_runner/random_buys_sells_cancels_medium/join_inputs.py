@@ -1,12 +1,8 @@
 filenames = [
     "random_c0_0.in",
-    "random_c1_1000.in",
-    "random_c2_2000.in",
-    "random_c3_3000.in",
-    "random_c4_4000.in",
-    "random_c5_5000.in",
-    "random_c6_6000.in",
-    "random_c7_7000.in"
+    "random_c1_100.in",
+    "random_c2_200.in",
+    "random_c3_300.in"
 ]
 
 out_filename = "random_bsc_combined.in"

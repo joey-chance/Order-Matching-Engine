@@ -64,8 +64,8 @@ void* run_client(void *sock_path, std::string input_fn, std::barrier<void(*)(voi
     char *socket_path = (char*)sock_path;
 
 	//Default pthread_exit values
-    void *exit_0 = 0;
-    void *exit_1 = (void*) 1;
+    // void *exit_0 = 0;
+    // void *exit_1 = (void*) 1;
 
     //Sync with other threads before proceeding
     sync_point.arrive_and_wait();
@@ -75,7 +75,8 @@ void* run_client(void *sock_path, std::string input_fn, std::barrier<void(*)(voi
 	if(clientfd == -1)
 	{
 		perror("socket");
-		pthread_exit(exit_1);//return 1;
+		// pthread_exit(exit_1);
+		// return 1;
 	}
 
 	{
@@ -85,7 +86,8 @@ void* run_client(void *sock_path, std::string input_fn, std::barrier<void(*)(voi
 		if(connect(clientfd, (const struct sockaddr*) &sockaddr, sizeof(sockaddr)) != 0)
 		{
 			perror("connect");
-			pthread_exit(exit_1);//return 1;
+			// pthread_exit(exit_1);
+			// return 1;
 		}
 	}
     //Create conn to engine END
@@ -98,7 +100,8 @@ void* run_client(void *sock_path, std::string input_fn, std::barrier<void(*)(voi
 	if(pthread_create(&poll_thread_handle, NULL, poll_thread, (void*) (long) clientfd) < 0)
 	{
 		fprintf(stderr, "Failed to create poll thread\n");
-		pthread_exit(exit_1);//return 1;
+		// pthread_exit(exit_1);
+		// return 1;
 	}
 
     // FILE *input_file = fopen("c1.in", "r");
@@ -122,7 +125,8 @@ void* run_client(void *sock_path, std::string input_fn, std::barrier<void(*)(voi
 				if(sscanf(line_buffer + 1, " %u", &input.order_id) != 1)
 				{
 					fprintf(stderr, "Invalid cancel order: %s\n", line_buffer);
-					pthread_exit(exit_1);//return 1;
+					// pthread_exit(exit_1);
+					// return 1;
 				}
 				break;
 			case INPUT_BUY_ORDER: input.type = input_buy; goto new_order;
@@ -132,24 +136,29 @@ void* run_client(void *sock_path, std::string input_fn, std::barrier<void(*)(voi
 				if(sscanf(line_buffer + 1, " %u %8s %u %u", &input.order_id, input.instrument, &input.price, &input.count) != 4)
 				{
 					fprintf(stderr, "Invalid new order: %s\n", line_buffer);
-					pthread_exit(exit_1);//return 1;
+					// pthread_exit(exit_1);
+					// return 1;
 				}
                 //fprintf(stdout, "%c %u %8s %u %u\n", input.type, input.order_id, input.instrument, input.price, input.count);
 				break;
-			default: fprintf(stderr, "Invalid command '%c'\n", line_buffer[0]); pthread_exit(exit_1);//return 1;
+			default: fprintf(stderr, "Invalid command '%c'\n", line_buffer[0]); //pthread_exit(exit_1);//return 1;
 		}
 
 		if(fwrite(&input, 1, sizeof(input), client) != sizeof(input))
 		{
 			fprintf(stderr, "Failed to write command\n");
-			pthread_exit(exit_1);
+			// pthread_exit(exit_1);
+			// return 1;
 		}
 	}
 
 	main_is_exiting = 1;
 	fclose(client);
 
-	pthread_exit(ferror(stderr) ? exit_1 : exit_0);//return ferror(stderr) ? 1 : 0;
+	// pthread_exit(ferror(stderr) ? exit_1 : exit_0);
+	//return ferror(stderr) ? 1 : 0;
+	ferror(stderr);
+	return 0;
 }
 
 int main(int argc, char* argv[]) {

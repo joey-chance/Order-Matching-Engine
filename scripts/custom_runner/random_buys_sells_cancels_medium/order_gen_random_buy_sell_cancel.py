@@ -2,8 +2,8 @@ import random as ran
 import sys
 
 # Set default order values
-client_number = 7
-num_orders = 1000
+client_number = 3
+num_orders = 100
 order_id_start = client_number*num_orders
 instr_name = "AAPL"
 # Set price

@@ -4,3 +4,7 @@ client
 /.deps
 compile_commands.json
 .cache
+scripts/custom_runner/a.out
+.err
+*_stderr.out
+*_stdout.out
