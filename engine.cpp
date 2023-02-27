@@ -218,7 +218,7 @@ void Engine::connection_thread(ClientConnection connection)
 						}
 					std::unique_lock execute_lk(orders->execute_mutex);
 					match_lk.unlock();
-					canEnter.notify_one();
+					canEnter.notify_all();
 					//Match phase end
 					//Execution phase begin
 
@@ -305,7 +305,7 @@ void Engine::connection_thread(ClientConnection connection)
 						}
 					std::unique_lock execute_lk(orders->execute_mutex);
 					match_lk.unlock();
-					canEnter.notify_one();
+					canEnter.notify_all();
 					//Match phase end
 					//Execution phase begin
 
@@ -406,7 +406,7 @@ void Engine::connection_thread(ClientConnection connection)
 						}
 					std::unique_lock execute_lk(orders->execute_mutex);
 					match_lk.unlock();
-					canEnter.notify_one();
+					canEnter.notify_all();
 					//Match phase end
 					//Execution phase begin
 
@@ -493,7 +493,7 @@ void Engine::connection_thread(ClientConnection connection)
 						}
 					std::unique_lock execute_lk(orders->execute_mutex);
 					match_lk.unlock();
-					canEnter.notify_one();
+					canEnter.notify_all();
 					//Match phase end
 					//Execution phase begin
 
